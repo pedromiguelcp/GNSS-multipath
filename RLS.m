@@ -112,7 +112,10 @@ for i = 0 : 20
         end
     end
     
-    lambda = 0.9;
+    % forgetting factor, article uses 0.95
+    lambda = 0.95;
+    %step size, form the article 0.02 shows faster convergence, 
+    %but greater values are not considered
     mu = 0.1;
 
     %filter data
@@ -131,7 +134,8 @@ function [W, xp] = rls(u, d, lambda)
     % Intializatize weight matrix and associated parameters for RLS predictor
     w = zeros(Nout,Nin);
     W = [];
-    delta=0.5;
+    % regularization paramter
+    delta=0.005;
     % reset filter variable between monte carlo runs
     P=eye(Nin)*delta;
     for n = 1:N
