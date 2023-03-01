@@ -91,7 +91,7 @@ for Index = 1: epochs
 end
 
 %RLS
-it=6;
+it=20;
 val = zeros(1,size(mltpth_delays, 2)+1);
 idx = zeros(1,size(mltpth_delays, 2)+1);
 u = zeros(it,5);
@@ -106,14 +106,14 @@ for i = 0 : 20
     for index = 1 : it
         num=1;
         for  subindex = VE: VL
-            u(index,num) = corr_out(subindex)/numSample;
-            d(index,num) = sum(code_replicas(subindex,:).*code_replicas(idx(i+1),:))/numSample;
+            u(index,num) = corr_out(subindex);
+            d(index,num) = sum(code_replicas(subindex,:).*code_replicas(idx(i+1),:));
             num=num+1;
         end
     end
     
     % forgetting factor, article uses 0.95
-    lambda = 0.95;
+    lambda = 0.05;
     %step size, form the article 0.02 shows faster convergence, 
     %but greater values are not considered
     mu = 0.1;
@@ -135,7 +135,7 @@ function [W, xp] = rls(u, d, lambda)
     w = zeros(Nout,Nin);
     W = [];
     % regularization paramter
-    delta=0.005;
+    delta=1;
     % reset filter variable between monte carlo runs
     P=eye(Nin)*delta;
     for n = 1:N
@@ -145,7 +145,7 @@ function [W, xp] = rls(u, d, lambda)
         % update kappa as perRLS
         kappa = lambda^(-1)*P*u(n,:)'/(1+lambda^(-1)*u(n,:)*P*u(n,:)');
         % update weights
-        w = w+kappa'*e(n); 
+        w = w+kappa*e(n,:); 
         % update as per R
         P = lambda^(-1)*P-lambda^(-1)*u(n,:)*kappa*P; 
     end

@@ -34,7 +34,7 @@ VL = corr_per_chip+3;
 mltpth_delays = [0.2 0.35 0.45];
 mltpth_attenuation = [2 2.5 3];
 
-epochs = 100; %signal tracking epochs
+epochs = 1000; %signal tracking epochs
 convergence_it = 0;
 
 % Generate the C/A code
@@ -48,7 +48,7 @@ for Index = 1: epochs
 
     %numSample = round((codelength-remChip)/(codeFreq/fs)); 
     
-    LOS_Code    = Spacing(P) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P));
+    LOS_Code    = Spacing(P) : codeFreqBasis/fs : ((numSample -1) * (codeFreqBasis/fs) + Spacing(P));
     INCode      = Code(ceil(LOS_Code) + 1);
 
     %interference injection
@@ -141,7 +141,10 @@ for subindex = VE : VL
     plot(Spacing(subindex),initial_results(subindex),'-g*');
     plot(time_stamps(subindex, 1),corr_out(subindex)/numSample,'r*');
 end
-
+plot([0 0],[1 0],'-bo');
+for subindex = 1: size(mltpth_delays, 2)
+    plot([mltpth_delays(subindex) mltpth_delays(subindex)],[1/mltpth_attenuation(subindex) 0],'-bo');
+end
 ylabel('Normalized Amplitude')
 xlabel('Delay [chips]')
 title('Initial/Final correlation result')

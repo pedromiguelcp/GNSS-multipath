@@ -34,8 +34,8 @@ L = corr_per_chip+2;
 VL = corr_per_chip+3;
 
 
-mltpth_delays = [0.2 0.35 0.45];
-mltpth_attenuation = [2 2.5 3];
+mltpth_delays = [0.2 0.35];
+mltpth_attenuation = [2 2.5];
 
 epochs = 10; %signal tracking epochs
 convergence_it = 0;
@@ -96,12 +96,15 @@ val = zeros(1,size(mltpth_delays, 2)+1);
 idx = zeros(1,size(mltpth_delays, 2)+1);
 G = zeros(numSample,size(mltpth_delays, 2)+1);
 A = zeros(size(mltpth_delays, 2)+1,size(mltpth_delays, 2)+1);
-D = zeros(size(mltpth_delays, 2)+1,size(mltpth_delays, 2)+1);
 Y = zeros(numSample,size(mltpth_delays, 2)+1);
+g = zeros(1,size(mltpth_delays, 2)+1);
+a = zeros(size(mltpth_delays, 2)+1,size(mltpth_delays, 2)+1);
+y = zeros(1,size(mltpth_delays, 2)+1);
+D = zeros(size(mltpth_delays, 2)+1,size(mltpth_delays, 2)+1);
 
 for i = 0 : size(mltpth_delays, 2)
 
-    while convergence_it < 20
+    while convergence_it < 30
 
         %step 1
         corr_out_SML = corr_out;
@@ -119,8 +122,11 @@ for i = 0 : size(mltpth_delays, 2)
         [val1, ] = min(idx(idx>0));
         Y(:,i+1) = code_replicas(idx(i+1),:).*INCode; % keep feeding the MLE algorithm
         G(:,i+1) = code_replicas(idx(i+1),:).*code_replicas(val1,:);
-        %A = pinv(G'*G)*(G'*Y);
-        A(i+1,1) = val(i+1)/numSample;
+        A = pinv(G'*G)*(G'*Y);
+        y(1,i+1) = corr_out_SML(idx(i+1));
+        g(1,i+1) = sum(code_replicas(idx(i+1),:).*INCode);
+        a(i+1,1) = (g(1,i+1)*y(1,i+1))/(g(1,i+1)*g(1,i+1));
+        %A(i+1,1) = a(i+1,1);
         
 
         %step 3
@@ -142,7 +148,10 @@ for i = 0 : size(mltpth_delays, 2)
             Y(:,k+1) = code_replicas(idx(k+1),:).*INCode;
             G(:,k+1) = code_replicas(idx(k+1),:).*code_replicas(val1,:);
             A = pinv(G'*G)*(G'*Y);
-            %A(k+1,1) = val(k+1)/numSample;
+            y(1,k+1) = corr_out_SML(idx(k+1));
+            g(1,k+1) = sum(code_replicas(idx(k+1),:).*INCode);
+            a(k+1,1) = (g(1,k+1)*y(1,k+1))/(g(1,k+1)*g(1,k+1));
+            %A(k+1,1) = a(k+1,1);
         end
        
         %step 4, change to find convergence
