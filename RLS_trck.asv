@@ -101,25 +101,27 @@ for Index = 1: epochs
     end
     filter_error(Index+1,:) = desired_response(Index,:) - filter_output(Index,:);
     %}
-
+    
     delay_time_stamps = (0:0.1:1);
     delay_size = size(delay_time_stamps,2);
-    G=zeros(numSample,delay_size);
-    g=zeros(numSample,1);
+    G=zeros((corr_per_chip*2+1),delay_size);
+    g=zeros(epochs,(corr_per_chip*2+1));
     y=zeros(epochs,(corr_per_chip*2+1));
 
     for subindex = 1 : delay_size
-        G(:,subindex) = code_replicas(subsubindex,:).*code_replicas(P+subindex-1,:);
+        for subsubindex = 1 : (corr_per_chip*2)
+            G(subsubindex,subindex) = sum(code_replicas(subsubindex,:).*code_replicas(P+subindex-1,:));
+        end
     end
 
     [val(Index), idx(Index)] = max(corr_out);
-    g(:,1) = code_replicas(idx(Index),:).*INCode;
+    for subindex = 1 : (corr_per_chip*2)
+        g(Index,subindex) = sum(code_replicas(subindex,:).*code_replicas(idx(Index),:));
+    end
 
     y(Index,:)=corr_out;
 
-
-    G_inv=pinv(G);
-    a1=g(Index,:)*G;
+    a1=g(Index,:)*G();
     a2=a1*y;
     a3=a1*g;
     a4=a2/a3;
