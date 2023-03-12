@@ -9,22 +9,29 @@ codeFreq = codeFreqBasis;
 codelength = 1023;
 numSample = round(codelength/(codeFreq/fs));
 remChip = 0;
+remChip_plot = 0;
 code_outputLast = 0;
 DLLdiscriLast = 0;
 cross_corr = 0;
 
 corr_per_chip = 10;
+corr_per_chip_plot = 50;
+
 Spacing = zeros(corr_per_chip*2+1);
+Spacing_plot = zeros(corr_per_chip_plot*2+1);
 time_stamps = zeros(corr_per_chip*2+1,numSample);
+time_stamps_plot = zeros(corr_per_chip_plot*2+1,numSample);
 code_replicas = zeros(corr_per_chip*2+1,numSample);
-initial_results = zeros(1,corr_per_chip*2+1);
+code_replicas_plot = zeros(corr_per_chip_plot*2+1,numSample);
 corr_out = zeros(1,corr_per_chip*2+1);
-corr_out_MEDLL = zeros(1,corr_per_chip*2+1);
-corr_out_MEDLL1 = zeros(1,corr_per_chip*2+1);
+corr_out_plot = zeros(1,corr_per_chip_plot*2+1);
 
 
 for Index = 1: (corr_per_chip*2+1)
     Spacing(Index) = -1 + (Index-1)/corr_per_chip;
+end
+for Index = 1: (corr_per_chip_plot*2+1)
+    Spacing_plot(Index) = -1 + (Index-1)/corr_per_chip_plot;
 end
 
 VE = corr_per_chip-1;
@@ -34,103 +41,129 @@ L = corr_per_chip+2;
 VL = corr_per_chip+3;
 
 % Specify here the multipath delay (chips) and attenuation (linear factor), compared to the LOS signal
-mltpth_delays = [0.1];
-mltpth_attenuation = [2];
+mltpth_delays = [0.066 0.133 0.233 0.4];
+mltpth_attenuation = [1.1 1.2 1.3 1.45];
 
-epochs = 300; %signal tracking epochs
-convergence_it = 0;
+epochs = 200; %signal tracking epochs
 
 % Generate the C/A code
 Code = generateCAcode(1); % Generate C/A code for satellite 1
 Code = [Code(end-1) Code(end) Code Code(1) Code(2) Code(3)];%enable replica slidding
 
+DLLdiscri = zeros(1,epochs);
 
 % RLS data
-weights = ones(5,5);
-filter_output = zeros(epochs,5);
-u = zeros(epochs,5);
-desired_response = zeros(epochs,(corr_per_chip*2+1));
-filter_error = zeros(epochs+1,5);
+weights = eye((corr_per_chip*2+1),(corr_per_chip*2+1));
+y = zeros(epochs,(corr_per_chip*2+1));
+d = zeros(epochs,(corr_per_chip*2+1));
+e = zeros(epochs+1,(corr_per_chip*2+1));
+P_rls = eye((corr_per_chip*2+1));
+
+% LOS estimation data
+G = zeros((corr_per_chip*2+1),(corr_per_chip*2+1));
+g = zeros((corr_per_chip*2+1),1);
+amplitude = zeros((corr_per_chip*2+1),1);
+a_los = zeros(1,epochs);
+tau_los = zeros(1,epochs);
 val = zeros(1,epochs);
 idx = zeros(1,epochs);
-P_rls=eye(5);
+
+Filter_ON = 0;
+Dynamic_simulation = 0;
+
+
 
 %tracking
 for Index = 1: epochs
 
     %numSample = round((codelength-remChip)/(codeFreq/fs)); 
-    
-    LOS_Code    = Spacing(P) : codeFreqBasis/fs : ((numSample -1) * (codeFreqBasis/fs) + Spacing(P));
-    INCode      = Code(ceil(LOS_Code) + 2);
+    if (Dynamic_simulation == 1) && (Index == 50)
+        mltpth_delays = [0.1 0.25 0.35];
+        mltpth_attenuation = [2 2.5 3];
+    end
 
-    %interference injection
-    for subindex = 1: size(mltpth_delays, 2)
-        multipath = Spacing(P) + mltpth_delays(subindex) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + mltpth_delays(subindex));
-        INCode = INCode + Code(ceil(multipath) + 2)./mltpth_attenuation(subindex);
+    if Index == 1
+        LOS_Code = Spacing(P) : codeFreqBasis/fs : ((numSample -1) * (codeFreqBasis/fs) + Spacing(P));
+        INCode   = Code(ceil(LOS_Code) + 2);
+        LOS_Code_plot = Spacing_plot(corr_per_chip_plot+1) : codeFreqBasis/fs : ((numSample -1) * (codeFreqBasis/fs) + Spacing_plot(corr_per_chip_plot+1));
+        INCode_plot   = Code(ceil(LOS_Code_plot) + 2);
+    
+        %interference injection
+        for subindex = 1: size(mltpth_delays, 2)
+            multipath = Spacing(P) + mltpth_delays(subindex) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + mltpth_delays(subindex));
+            INCode = INCode + Code(ceil(multipath) + 2)./mltpth_attenuation(subindex);
+            multipath_plot = Spacing_plot(corr_per_chip_plot+1) + mltpth_delays(subindex) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing_plot(corr_per_chip_plot+1) + mltpth_delays(subindex));
+            INCode_plot = INCode_plot + Code(ceil(multipath_plot) + 2)./mltpth_attenuation(subindex);
+        end
     end
 
     %correlator engine
-    for subindex = 2: (corr_per_chip*2)
+    for subindex = 1: (corr_per_chip*2)+1
         time_stamps(subindex,:) = (Spacing(subindex) + remChip) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(subindex) + remChip);
-    end
-
-    for subindex = 2: (corr_per_chip*2)
+    end  
+    for subindex = 1: (corr_per_chip*2)+1
         code_replicas(subindex,:) = Code(ceil(time_stamps(subindex,:)) + 2);
-    end
-
-    for subindex = 2: (corr_per_chip*2)
+    end   
+    for subindex = 1: (corr_per_chip*2)+1
         corr_out(subindex) = sum(code_replicas(subindex,:)     .*INCode);
     end
-
     remChip   = (time_stamps(P,numSample) + codeFreq/fs) - codeFreqBasis*0.001;
+
+    % plot purposes - more resolution in the correlation function plot
+    for subindex = 1: (corr_per_chip_plot*2)+1%remove
+        time_stamps_plot(subindex,:) = Spacing_plot(subindex) : codeFreqBasis/fs : (numSample -1) * (codeFreqBasis/fs) + Spacing_plot(subindex);
+    end
+    for subindex = 1: (corr_per_chip_plot*2)+1%remove
+        code_replicas_plot(subindex,:) = Code(ceil(time_stamps_plot(subindex,:)) + 2);
+    end
+    for subindex = 1: (corr_per_chip_plot*2)+1%remove
+        corr_out_plot(subindex) = sum(code_replicas_plot(subindex,:)     .*INCode_plot);
+    end
+
+    %% TKEO %%
+    %tkeo = zeros(1,corr_per_chip_plot*2+1);
+    %for subindex = 2: (corr_per_chip_plot*2)
+    %    tkeo(subindex) = corr_out_plot(subindex)*corr_out_plot(subindex) - (corr_out_plot(subindex-1)*corr_out_plot(subindex+1));
+    %end
+    %plot(Spacing_plot(1 : 1 : corr_per_chip_plot*2+1), tkeo(1 : 1 : corr_per_chip_plot*2+1)/max(tkeo),'-','Color',"#77AC30",'DisplayName','Correlation output');
+
+
+
+    %%%%%%%% ADAPTIVE CHANNEL COMPENSATION %%%%%%%%
+    [weights, y(Index,:), P_rls] = filter_rls(corr_out, e(Index,:), weights, P_rls, 0.99);
+    [max_val, max_idx] = max(corr_out);
     
 
-
-    % ADAPTIVE CHANNEL COMPENSATION
-    %{
-    u(Index,:) = corr_out(VE : 1 : VL);
-    [weights, filter_output(Index,:), P_rls] = filter_rls(corr_out(VE : 1 : VL), filter_error(Index,:), weights, P_rls, 0.95);
-
+    %%%%%%%% LOS SIGNAL ESTIMATION BLOCK %%%%%%%%  
+    if(Index == 1) %this only needs to be computed once
+        % compute known matrix G (LxL)
+        for subindex = 1 : (corr_per_chip*2+1)
+            for subsubindex = 1 : (corr_per_chip*2+1)
+                G(subindex,subsubindex) = sum(code_replicas(subindex,:).*code_replicas(subsubindex,:));
+            end
+        end
+        G = inv(G);
+    end
     
-    % LOS SIGNAL ESTIMATION BLOCK
-    [val(Index), idx(Index)] = max(corr_out);
-    cnt=1;
+    %ML equation - search LOS delay to maximize LOS amplitude - eq42
+    for search_index = 1 : (corr_per_chip*2+1)
+        for subindex = 1 : (corr_per_chip*2+1)
+            g(subindex,1) = sum(code_replicas(search_index,:).*code_replicas(subindex,:));
+        end    
+        amplitude(search_index,1) = (g'*G*y(Index,:)')/(g'*G*g);
+    end  
+    % get the max amplitude instead of doing equation again (line 117)
+    % equivalent to eq43
+    [a_los(Index), tau_los(Index)] = max(amplitude); % the return is the same as the commented line 98
+    
+    % compute desired response
     for subindex = 1 : (corr_per_chip*2)
-        desired_response(Index,cnt) = sum(code_replicas(subindex,:).*code_replicas(idx(Index),:));
-        cnt=cnt+1;
-    end
-    filter_error(Index+1,:) = desired_response(Index,:) - filter_output(Index,:);
-    %}
-
-    delay_time_stamps = (0:0.1:1);
-    delay_size = size(delay_time_stamps,2);
-    G=zeros(numSample,delay_size);
-    g=zeros(numSample,1);
-    y=zeros(epochs,(corr_per_chip*2+1));
-
-    for subindex = 1 : delay_size
-        G(:,subindex) = code_replicas(subsubindex,:).*code_replicas(P+subindex-1,:);
+        %auto-correlation between LOS replica and the other replicas (perfect triangle)
+        d(Index,subindex) = sum(code_replicas(subindex,:).*code_replicas(tau_los(Index),:))*a_los(Index);
     end
 
-    [val(Index), idx(Index)] = max(corr_out);
-    g(:,1) = code_replicas(idx(Index),:).*INCode;
-
-    y(Index,:)=corr_out;
-
-
-    G_inv=pinv(G);
-    a1=g(Index,:)*G;
-    a2=a1*y;
-    a3=a1*g;
-    a4=a2/a3;
-    
-    
-    %y=filter_output(Index,:);%1x5
-    %g=desired_response(Index,:);%1x5
-    %G=;%
-    %a=(g*y)/(g*g);%1x1
-    %desired_response(Index,:)=desired_response(Index,:).*a;
-    
+    % compute error
+    e(Index+1,:) = d(Index,:) - y(Index,:);
 
     
 
@@ -138,37 +171,78 @@ for Index = 1: epochs
     DLL_E           = sqrt(corr_out(E)^2);
     DLL_L           = sqrt(corr_out(L)^2);
 
-    DLLdiscri       = 0.5 * (DLL_E-DLL_L)/(DLL_E+DLL_L);
-    newDLLdiscri    = Spacing(P) - Spacing(idx(Index));
-    DLLdiscri      = newDLLdiscri;
-    code_output     = code_outputLast + (0.3749245/0.007030542258775)*(DLLdiscri - DLLdiscriLast) + DLLdiscri* (0.001/0.007030542258775);
-    DLLdiscriLast   = DLLdiscri;
+    DLLdiscri(1,Index)       = 0.5 * (DLL_E-DLL_L)/(DLL_E+DLL_L);
+    if Filter_ON==1
+        newDLLdiscri    = Spacing(P) - Spacing(tau_los(Index)); %difference between delay of prompt and delay of max peak
+        DLLdiscri(1,Index)       = newDLLdiscri;
+    end
+    code_output     = code_outputLast + (0.3749245/0.007030542258775)*(DLLdiscri(1,Index) - DLLdiscriLast) + DLLdiscri(1,Index)* (0.001/0.007030542258775);
+    DLLdiscriLast   = DLLdiscri(1,Index);
     code_outputLast = code_output;
     codeFreq        = codeFreqBasis - code_output;
 
 
     if(Index == 1) 
-        initial_results = corr_out./numSample;
+        % plot initial correlation output
+        response = figure(1);
+        [val_max, idx_max] = max(corr_out_plot);
+        corr_function=plot(Spacing_plot(2 : 1 : corr_per_chip_plot*2), corr_out_plot(2 : 1 : corr_per_chip_plot*2)./val_max,'-','Color',"#77AC30",'DisplayName','Correlation output');
+        ylabel('Normalized Amplitude')
+        xlabel('Delay [chips]')
+        title('Correlation function')
+        xlim([-1.2 1.2])
+        ylim([0 1.2])
+        hold on;
+        % plot initial desired response
+        if Filter_ON==1
+            p3=plot(time_stamps(:, 1), d(1,:)/val_max,'-','Color',"#D95319",'DisplayName','Desired response');
+            p4=plot(time_stamps(:, 1), y(1,:)/val_max,'-','Color',"#7E2F8E",'DisplayName','Filter output');
+        end
+        % plot initial position of central correlators and filter peak
+        p1=plot(Spacing((VE : 1 : VL)),corr_out((VE : 1 : VL))/val_max,'*','Color',"#77AC30",'DisplayName','Central correlators (VE, E, P, L, VL)');
+        if Filter_ON==1
+            p2=plot(time_stamps((VE : 1 : VL), 1),d(1,(VE : 1 : VL))/val_max,'*','Color',"#D95319",'DisplayName','Central correlators (VE, E, P, L, VL)');
+            p5=plot(time_stamps((VE : 1 : VL), 1),y(1,(VE : 1 : VL))/val_max,'*','Color',"#7E2F8E",'DisplayName','Central correlators (VE, E, P, L, VL)');
+        end
+        % plot multipath information
+        legend
+        drawnow
+        plot([0 0],[1 0],'-bo','HandleVisibility','off');
+        for subindex = 1: size(mltpth_delays, 2)
+            plot([mltpth_delays(subindex) mltpth_delays(subindex)],[1/mltpth_attenuation(subindex) 0],'-bo','HandleVisibility','off');
+        end
+        drawnow
+        dll_fig = figure(2);
+        discri=plot((1 : 1 : Index), DLLdiscri(1,(1 : 1 : Index)),'-','Color',"#7E2F8E");
+        ylabel('DLL discriminator')
+        xlabel('Epochs (ms)')
+        title('DLL corrections')
+        drawnow
     end
+
+    %%%% REFRESH PLOTS %%%%
+    [val_max, idx_max] = max(corr_out_plot);
+    if Filter_ON==1
+        % full curve - desired response
+        set(p3,'XData',time_stamps(:, 1),'YData',d(Index,:)/val_max); 
+        % full curve - filter output
+        set(p4,'XData',time_stamps(:, 1),'YData',y(Index,:)/val_max); 
+        % central peaks
+        set(p2,'XData',time_stamps((VE : 1 : VL), 1),'YData',d(Index,(VE : 1 : VL))/val_max);
+        set(p5,'XData',time_stamps((VE : 1 : VL), 1),'YData',y(Index,(VE : 1 : VL))/val_max);
+        
+    end
+    set(p1,'XData',time_stamps((VE : 1 : VL), 1),'YData',corr_out(VE : 1 : VL)/val_max);
+    set(corr_function,'XData',Spacing_plot(2 : 1 : corr_per_chip_plot*2),'YData',corr_out_plot(2 : 1 : corr_per_chip_plot*2)/val_max);
+    drawnow
+    set(discri,'XData',(1 : 1 : Index),'YData',DLLdiscri(1,(1 : 1 : Index)));
+    drawnow
+    %pause(0.2);
 end
 
-% Plot the results
-plot(Spacing(2 : 1 : corr_per_chip*2), initial_results(2 : 1 : corr_per_chip*2),'-');
-hold on;
-for subindex = VE : VL
-    plot(Spacing(subindex),initial_results(subindex),'-g*');
-    plot(time_stamps(subindex, 1),corr_out(subindex)/numSample,'r*');
-end
-plot([0 0],[1 0],'-bo');
-for subindex = 1: size(mltpth_delays, 2)
-    plot([mltpth_delays(subindex) mltpth_delays(subindex)],[1/mltpth_attenuation(subindex) 0],'-bo');
-end
+%{
 
-ylabel('Normalized Amplitude')
-xlabel('Delay [chips]')
-title('Initial/Final correlation result')
-
-
+%}
 function [w, xp, P_rls] = filter_rls(u, e, w, P_rls, lambda)
 
     xp(1,:) = u(1,:)*w';
@@ -177,10 +251,10 @@ function [w, xp, P_rls] = filter_rls(u, e, w, P_rls, lambda)
     % update weights
     w = w+kappa*e(1,:); 
     % update as per R
-    P_rls = lambda^(-1)*P_rls-lambda^(-1)*u(1,:)*kappa*P_rls; 
+    P_rls = lambda^(-1)*P_rls-lambda^(-1)*u(1,:)*kappa*P_rls;
+    P_rls = P_rls*norm(P_rls);
 end
 
 
-%{
 
-%}
+

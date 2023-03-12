@@ -31,10 +31,10 @@ L = corr_per_chip+2;
 VL = corr_per_chip+3;
 
 
-mltpth_delays = [0.2 0.35];
-mltpth_attenuation = [2 2.5];
+mltpth_delays = [0.2 0.35 0.45];
+mltpth_attenuation = [2 2.5 3];
 
-epochs = 300; %signal tracking epochs
+epochs = 1; %signal tracking epochs
 convergence_it = 0;
 
 % Generate the C/A code
