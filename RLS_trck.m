@@ -44,7 +44,7 @@ VL = corr_per_chip+3;
 mltpth_delays = [0.066 0.133 0.233 0.4];
 mltpth_attenuation = [1.1 1.2 1.3 1.45];
 
-epochs = 200; %signal tracking epochs
+epochs = 500; %signal tracking epochs
 
 % Generate the C/A code
 Code = generateCAcode(1); % Generate C/A code for satellite 1
@@ -68,7 +68,7 @@ tau_los = zeros(1,epochs);
 val = zeros(1,epochs);
 idx = zeros(1,epochs);
 
-Filter_ON = 0;
+Filter_ON = 1;
 Dynamic_simulation = 0;
 
 
@@ -120,17 +120,9 @@ for Index = 1: epochs
         corr_out_plot(subindex) = sum(code_replicas_plot(subindex,:)     .*INCode_plot);
     end
 
-    %% TKEO %%
-    %tkeo = zeros(1,corr_per_chip_plot*2+1);
-    %for subindex = 2: (corr_per_chip_plot*2)
-    %    tkeo(subindex) = corr_out_plot(subindex)*corr_out_plot(subindex) - (corr_out_plot(subindex-1)*corr_out_plot(subindex+1));
-    %end
-    %plot(Spacing_plot(1 : 1 : corr_per_chip_plot*2+1), tkeo(1 : 1 : corr_per_chip_plot*2+1)/max(tkeo),'-','Color',"#77AC30",'DisplayName','Correlation output');
-
-
-
     %%%%%%%% ADAPTIVE CHANNEL COMPENSATION %%%%%%%%
-    [weights, y(Index,:), P_rls] = filter_rls(corr_out, e(Index,:), weights, P_rls, 0.99);
+    [weights, y(Index,:), P_rls] = filter_rls(corr_out, e(Index,:), weights, P_rls, 0.8);
+    %y(Index,:) = corr_out;
     [max_val, max_idx] = max(corr_out);
     
 
@@ -154,7 +146,7 @@ for Index = 1: epochs
     end  
     % get the max amplitude instead of doing equation again (line 117)
     % equivalent to eq43
-    [a_los(Index), tau_los(Index)] = max(amplitude); % the return is the same as the commented line 98
+    [a_los(Index), tau_los(Index)] = max(amplitude); % the return is the same as [max_val, max_idx] = max(corr_out);
     
     % compute desired response
     for subindex = 1 : (corr_per_chip*2)
@@ -176,7 +168,13 @@ for Index = 1: epochs
         newDLLdiscri    = Spacing(P) - Spacing(tau_los(Index)); %difference between delay of prompt and delay of max peak
         DLLdiscri(1,Index)       = newDLLdiscri;
     end
-    code_output     = code_outputLast + (0.3749245/0.007030542258775)*(DLLdiscri(1,Index) - DLLdiscriLast) + DLLdiscri(1,Index)* (0.001/0.007030542258775);
+    if (Filter_ON==1) && (Index > 1) && (DLLdiscri(1,Index) == 0) && (DLLdiscri(1,Index-1) == 0)
+        code_output = 0; % normal DLL always keeps sliding the correlators (drifting) to search near peaks
+    else
+        code_output     = code_outputLast + (0.3749245/0.007030542258775)*(DLLdiscri(1,Index) - DLLdiscriLast) + DLLdiscri(1,Index)* (0.001/0.007030542258775);
+    end
+
+    
     DLLdiscriLast   = DLLdiscri(1,Index);
     code_outputLast = code_output;
     codeFreq        = codeFreqBasis - code_output;
@@ -184,8 +182,9 @@ for Index = 1: epochs
 
     if(Index == 1) 
         % plot initial correlation output
-        response = figure(1);
         [val_max, idx_max] = max(corr_out_plot);
+        response = figure(1);
+        subplot(1,2,1);
         corr_function=plot(Spacing_plot(2 : 1 : corr_per_chip_plot*2), corr_out_plot(2 : 1 : corr_per_chip_plot*2)./val_max,'-','Color',"#77AC30",'DisplayName','Correlation output');
         ylabel('Normalized Amplitude')
         xlabel('Delay [chips]')
@@ -199,20 +198,21 @@ for Index = 1: epochs
             p4=plot(time_stamps(:, 1), y(1,:)/val_max,'-','Color',"#7E2F8E",'DisplayName','Filter output');
         end
         % plot initial position of central correlators and filter peak
-        p1=plot(Spacing((VE : 1 : VL)),corr_out((VE : 1 : VL))/val_max,'*','Color',"#77AC30",'DisplayName','Central correlators (VE, E, P, L, VL)');
+        p1=plot(Spacing((VE : 1 : VL)),corr_out((VE : 1 : VL))/val_max,'*','Color',"#77AC30",'DisplayName','VE-VL');
         if Filter_ON==1
-            p2=plot(time_stamps((VE : 1 : VL), 1),d(1,(VE : 1 : VL))/val_max,'*','Color',"#D95319",'DisplayName','Central correlators (VE, E, P, L, VL)');
-            p5=plot(time_stamps((VE : 1 : VL), 1),y(1,(VE : 1 : VL))/val_max,'*','Color',"#7E2F8E",'DisplayName','Central correlators (VE, E, P, L, VL)');
+            p2=plot(time_stamps((VE : 1 : VL), 1),d(1,(VE : 1 : VL))/val_max,'*','Color',"#D95319",'DisplayName','VE-VL');
+            p5=plot(time_stamps((VE : 1 : VL), 1),y(1,(VE : 1 : VL))/val_max,'*','Color',"#7E2F8E",'DisplayName','VE-VL');
         end
         % plot multipath information
         legend
         drawnow
         plot([0 0],[1 0],'-bo','HandleVisibility','off');
+
         for subindex = 1: size(mltpth_delays, 2)
             plot([mltpth_delays(subindex) mltpth_delays(subindex)],[1/mltpth_attenuation(subindex) 0],'-bo','HandleVisibility','off');
         end
         drawnow
-        dll_fig = figure(2);
+        subplot(1,2,2);
         discri=plot((1 : 1 : Index), DLLdiscri(1,(1 : 1 : Index)),'-','Color',"#7E2F8E");
         ylabel('DLL discriminator')
         xlabel('Epochs (ms)')
@@ -237,7 +237,7 @@ for Index = 1: epochs
     drawnow
     set(discri,'XData',(1 : 1 : Index),'YData',DLLdiscri(1,(1 : 1 : Index)));
     drawnow
-    %pause(0.2);
+    pause(0.2);
 end
 
 %{
@@ -246,13 +246,31 @@ end
 function [w, xp, P_rls] = filter_rls(u, e, w, P_rls, lambda)
 
     xp(1,:) = u(1,:)*w';
+    xp(1,:) = xp(1,:)*norm(u)/norm(xp(1,:));
     % update kappa as perRLS
     kappa = lambda^(-1)*P_rls*u(1,:)'/(1+lambda^(-1)*u(1,:)*P_rls*u(1,:)');
     % update weights
     w = w+kappa*e(1,:); 
     % update as per R
     P_rls = lambda^(-1)*P_rls-lambda^(-1)*u(1,:)*kappa*P_rls;
-    P_rls = P_rls*norm(P_rls);
+    %P_rls = P_rls*norm(P_rls);
+end
+
+function [w, xp, P_rls] = filter_rls2(u, e, w, P_rls, lambda)
+
+    xp(1,:) = u(1,:)*w';
+    %xp(1,:) = xp(1,:)*norm(u)/norm(xp(1,:));
+    % update kappa as perRLS
+    P_rls=lambda^(-1)*(P_rls - (lambda^(-1)*P_rls*u(1,:)'*u(1,:)*P_rls)/(1+lambda^(-1)*u(1,:)*P_rls*u(1,:)'));
+    w=w+P_rls*u(1,:)'*e(1,:);
+
+
+    %kappa = lambda^(-1)*P_rls*u(1,:)'/(1+lambda^(-1)*u(1,:)*P_rls*u(1,:)');
+    % update weights
+    %w = w+kappa*e(1,:); 
+    % update as per R
+    %P_rls = lambda^(-1)*P_rls-lambda^(-1)*u(1,:)*kappa*P_rls;
+    %P_rls = P_rls*norm(P_rls);
 end
 
 

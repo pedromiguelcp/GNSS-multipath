@@ -1,0 +1,3 @@
+Initial position:
+	[22.31439029684325, 114.2063643133900, 12.849], Latitude(deg) Longitude(deg) height(meter)
+

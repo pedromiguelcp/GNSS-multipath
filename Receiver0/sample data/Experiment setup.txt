@@ -1,0 +1,28 @@
+The experiment was conducted on 30 Sep 2018 in Hong Kong.
+
+Data: 
+	data_20180930_KAITOK_dynamic_f.dat
+
+Initial position:
+	[22.31439029684325, 114.2063643133900, 12.849], Latitude(deg) Longitude(deg) height(meter)
+
+Front-end: 
+	NSL Stereo V2
+
+Data length: 
+	110s
+
+Constellation and frequency band: 
+	GPS L1
+
+Sampling frequency: 
+	26MHz
+
+Intermediate frequency: 
+	6.5MHz
+
+Bandwidth: 
+	2MHz
+
+Sampling type: 
+	2-bit, real
