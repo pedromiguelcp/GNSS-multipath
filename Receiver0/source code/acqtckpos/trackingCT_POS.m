@@ -123,7 +123,25 @@ phase_beta             = zeros(1,svlength);
 
 
 %% *************** %%
-corr_per_chip_plot = 5;
+corr_per_chip_plot = 60;
+lambda=0.95;
+d = zeros(1,(corr_per_chip_plot*2+1));
+u = zeros(1,(corr_per_chip_plot*2+1));
+last_u = zeros(svlength,(corr_per_chip_plot*2+1));
+last_last_u = zeros(svlength,(corr_per_chip_plot*2+1));
+last_last_E_i = zeros(svlength,1);
+last_last_E_q = zeros(svlength,1);
+last_last_P_i = zeros(svlength,1);
+last_last_P_q = zeros(svlength,1);
+last_last_L_i = zeros(svlength,1);
+last_last_L_q = zeros(svlength,1);
+last_E_i = zeros(svlength,1);
+last_E_q = zeros(svlength,1);
+last_P_i = zeros(svlength,1);
+last_P_q = zeros(svlength,1);
+last_L_i = zeros(svlength,1);
+last_L_q = zeros(svlength,1);
+channel3 = zeros(1,corr_per_chip_plot*2+1);
 Spacing_plot = zeros(1,corr_per_chip_plot*2+1);
 for Index = 1: (corr_per_chip_plot*2+1)
     Spacing_plot(Index) = -1 + (Index-1)/corr_per_chip_plot;
@@ -183,8 +201,35 @@ for msIndex = 1: 2000/pdi
         L_q = sum(CodeLate     .*QuadratureSignal);
 
 
+        %%%%%%%% HIGH RESOLUTION CORRELATOR %%%%%%%%
+        time_stamps_plot = zeros(corr_per_chip_plot*2+1,numSample);
+        code_replicas_plot = zeros(corr_per_chip_plot*2+1,numSample);
+        corr_out_plot = zeros(1,corr_per_chip_plot*2+1);
+        for subindex = 1: (corr_per_chip_plot*2)+1
+            time_stamps_plot(subindex,:) = (Spacing_plot(subindex) + remChip(svindex)) : codeFreq(svindex)/signal.Fs : ((numSample -1) * (codeFreq(svindex)/signal.Fs) + Spacing_plot(subindex) + remChip(svindex));
+            code_replicas_plot(subindex,:) = Code(svindex,ceil(time_stamps_plot(subindex,:)) + 2);
+            corr_out_plot(subindex) = sum(code_replicas_plot(subindex,:)     .*InphaseSignal);
+        end
+        %%%%%%%% PSEUDO LOS %%%%%%%%
+        for subindex = 1 : corr_per_chip_plot*2+1
+            d(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(corr_per_chip_plot+1,:));
+        end
+        %%%%%%%% INVERSE CHANNEL %%%%%%%%
+        u=last_last_u(svindex,:)'+last_u(svindex,:)'+abs(corr_out_plot(:));
+        last_last_u(svindex,:)=last_u(svindex,:);
+        last_u(svindex,:)=abs(corr_out_plot);
 
+        [channel3] = filter_rls2(u, d, lambda);
+        %%%%%%%% FIND LOS IMPULSE %%%%%%%%
+        [a_los, t_los] = max(channel3);
+        %%%%%%%% FILTERED CORRELATION FUNCTION %%%%%%%%
+        for subindex = 1 : corr_per_chip_plot*2+1
+            f_corr_out(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(corr_per_chip_plot+1+t_los-2,:));
+        end
+        E_i = f_corr_out(1,corr_per_chip_plot);  
+        L_i	= f_corr_out(1,corr_per_chip_plot+2);  
 
+%{        
         if (detail_corr_fun == 1)
             time_stamps_plot = zeros(corr_per_chip_plot*2+1,numSample);
             code_replicas_plot = zeros(corr_per_chip_plot*2+1,numSample);
@@ -203,7 +248,7 @@ for msIndex = 1: 2000/pdi
             LS_H = inv(LS_G'*LS_G)*(LS_G'*LS_D);
             [a_los, tau_los] = max(abs(LS_H));
         end
-        %% *********** %%
+        %}
 
         
         % Calculate CN0
@@ -236,7 +281,7 @@ for msIndex = 1: 2000/pdi
         %codeError(svindex) = 0.5*(E-L)/(E+L);  % DLL discriminator
 
         %[a_los, tau_los] = max(abs(corr_out_plot));
-        codeError(svindex)       = 0.5*(t_CodePrompt(1) - time_stamps_plot(tau_los));
+        codeError(svindex)       = 0.5*(t_CodePrompt(1) - time_stamps_plot(corr_per_chip_plot+1+t_los-2));
 
 
         codeNco(svindex) = code_outputLast(svindex) + (tau2code/tau1code)*(codeError(svindex)...
@@ -470,3 +515,34 @@ close(h);
 save(['navSolCT_',file.fileName], 'navSolutionsCT','eph','TOW_USR_CT');
 save(['tckRstCT_',file.fileName], 'TckResultCT','CN0_CT'); 
 
+function [h] = filter_rls2(u, d, lambda)
+  
+    N=length(d);%number of correlators
+    d=d(:);
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Multipath is just the inverse system
+    for i=1:1
+        d=[d; 0];
+        u=[0; u];
+    end
+    M=ceil(length(d)/2);
+    delta=0.005;
+    P = eye(M)/delta;
+    uvec=zeros(M,1);
+    h=zeros(M,1);
+    for i=1:N
+        if i<M
+            uvec(1:1:i)=d(i:-1:1);
+        else
+            uvec=d(i:-1:i-M+1);
+        end
+        kappa = lambda^(-1)*P*uvec/(1+lambda^(-1)*uvec'*P*uvec);
+        e=u(i)-h'*uvec;
+        h=h+kappa*conj(e);
+        P = lambda^(-1)*P-lambda^(-1)*kappa*uvec'*P;
+    end
+
+    %imp=conv(w,h);%must be (approaches) de impulse function
+end
+end

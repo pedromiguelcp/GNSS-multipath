@@ -69,7 +69,7 @@ for Index = 1: epochs
         mltpth_delays=chan2.delays;
         mltpth_attenuation=chan2.attenuation;
         trigger_new_corr_func = 1;
-    elseif Index <= 1000
+    elseif Index <= 500
         move_los = move_los-0.001;
         trigger_new_los = 1;
     end

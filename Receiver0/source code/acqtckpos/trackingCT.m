@@ -38,7 +38,7 @@ CN0fromSNR = zeros(1,datalength);
 G = zeros((corr_per_chip_plot*2+1),(corr_per_chip_plot*2+1));
 g = zeros((corr_per_chip_plot*2+1),1);
 
-detail_corr_fun = 1;
+detail_corr_fun = 0;
 just_multipath = 0;
 no_plots = 0;
 

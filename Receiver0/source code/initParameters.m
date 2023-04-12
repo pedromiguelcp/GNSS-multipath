@@ -45,7 +45,7 @@ acq.L           = 10;       % number of ms to perform FFT
 
 
 %% Tracking parameters
-track.CorrelatorSpacing  	= 0.5;  % unit: chip
+track.CorrelatorSpacing  	= 0.1;  % unit: chip
 track.DLLBW               	= 2;	% unit: Hz
 track.DLLDamp           	= 0.707; 
 track.DLLGain            	= 0.1;	

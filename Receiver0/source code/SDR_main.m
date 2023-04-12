@@ -17,7 +17,7 @@ format long g;
 addpath ('C:\Users\Pedro\Documents\phd\git\GNSS-multipath\Receiver0\source code\geo')             % Geo-related functions, e.g. ionospheric correction function
 addpath ('C:\Users\Pedro\Documents\phd\git\GNSS-multipath\Receiver0\source code\acqtckpos')      % Acquisition, tracking, and postiong calculation functions
 
-do_tracking = 1;
+do_tracking = 0;
 do_positioning = 1;
 %% Parameter initialization 
 [file, signal, acq, track, solu, cmn] = initParameters();
