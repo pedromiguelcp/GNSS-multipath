@@ -122,34 +122,80 @@ phase_beta             = zeros(1,svlength);
 
 
 
-%% *************** %%
-corr_per_chip_plot = 60;
+%% *******RLS variables******** %%
+corr_per_chip_plot = 20;
 lambda=0.95;
 d = zeros(1,(corr_per_chip_plot*2+1));
 u = zeros(1,(corr_per_chip_plot*2+1));
-last_u = zeros(svlength,(corr_per_chip_plot*2+1));
-last_last_u = zeros(svlength,(corr_per_chip_plot*2+1));
-last_last_E_i = zeros(svlength,1);
-last_last_E_q = zeros(svlength,1);
-last_last_P_i = zeros(svlength,1);
-last_last_P_q = zeros(svlength,1);
-last_last_L_i = zeros(svlength,1);
-last_last_L_q = zeros(svlength,1);
-last_E_i = zeros(svlength,1);
-last_E_q = zeros(svlength,1);
-last_P_i = zeros(svlength,1);
-last_P_q = zeros(svlength,1);
-last_L_i = zeros(svlength,1);
-last_L_q = zeros(svlength,1);
 channel3 = zeros(1,corr_per_chip_plot*2+1);
 Spacing_plot = zeros(1,corr_per_chip_plot*2+1);
 for Index = 1: (corr_per_chip_plot*2+1)
     Spacing_plot(Index) = -1 + (Index-1)/corr_per_chip_plot;
 end
-%% *************** %%
-detail_corr_fun = 1;
-no_plots = 1;
+
+enable_RLS=1;
+enable_RLS_plot=1;
 save_cn0 = 0;
+numSample = round((signal.codelength*pdi)/(f0/signal.Fs));
+
+if enable_RLS_plot
+    colororder({'[0.4660 0.6740 0.1880]','#D95319'})
+    corr_func = figure(1);
+    subplot(2,2,1:2)
+    yyaxis left
+    corr_function=plot(Spacing_plot, zeros(1,corr_per_chip_plot*2+1),'*-','Color',"#77AC30",'DisplayName','Raw Correlation');
+    ylabel('Normalized Amplitude');
+    xlabel('Delay [chips]');
+    title('Correlation function');
+    ylim([0 10000])
+    xlim([-1.5 1.5])
+    hold on;
+    central_corr=plot(Spacing_plot(corr_per_chip_plot:1:corr_per_chip_plot+2), zeros(1,3),'*-','Color',"#0072BD",'HandleVisibility','off');
+    yyaxis right
+    fcorr_func=plot(Spacing_plot, zeros(1,corr_per_chip_plot*2+1),'*-','Color',"#D95319",'DisplayName','Artifitial Correlation');
+    fcentral_corr=plot(Spacing_plot(corr_per_chip_plot:1:corr_per_chip_plot+2), zeros(1,3),'*-','Color',"#0072BD",'HandleVisibility','off');
+    ylim([0 (numSample+1000)])
+    xlim([-1.5 1.5])
+    legend
+    drawnow
+    subplot(2,2,3)
+    legend
+    invCH=plot((-1/corr_per_chip_plot:1/corr_per_chip_plot:1-1/corr_per_chip_plot),zeros(1,corr_per_chip_plot+1),'-*','Color',"#0072BD",'HandleVisibility','off');
+    ylabel('Amplitude');
+    xlabel('H');
+    title('INVERSE CHANNEL');
+    hold on
+    los_imp=plot(0,0,'*','Color',"#D95319");
+    ylim([-0.1 1])
+    subplot(2,2,4)
+    legend
+    pdllDiscr=plot((1),zeros(1,1),'-','Color',"#0072BD",'HandleVisibility','off');
+    ylabel('Correction');
+    xlabel('Epoch (ms)');
+    title('DLL DISCRIMINATOR');
+end
+
+enable_freq_plot=0;
+if enable_freq_plot
+    carrfreq_variation = zeros(1,2000);
+    codefreq_variation = zeros(1,2000);
+    figure(1);
+    subplot(2,1,1);
+    carr_freq_plot=plot(zeros(1,1), zeros(1,1),'*-');
+    ylabel('Frequency (Hz)');
+    xlabel('Epoch (ms)');
+    title('Carrier Frequency variation');
+    ylim([-10 10]);
+
+    subplot(2,1,2);
+    code_freq_plot=plot(zeros(1,1), zeros(1,1),'*-');
+    ylabel('Frequency (Hz)');
+    xlabel('Epoch (ms)');
+    title('Code Frequency variation');
+    ylim([-2 2]);
+    drawnow  
+end
+
     
 h = waitbar(0,['Conventional Tracking, Length: ',num2str(datalength),' ms,', '  Please wait...']);
 %%
@@ -200,37 +246,9 @@ for msIndex = 1: 2000/pdi
         L_i	= sum(CodeLate     .*InphaseSignal);  
         L_q = sum(CodeLate     .*QuadratureSignal);
 
-
-        %%%%%%%% HIGH RESOLUTION CORRELATOR %%%%%%%%
-        time_stamps_plot = zeros(corr_per_chip_plot*2+1,numSample);
-        code_replicas_plot = zeros(corr_per_chip_plot*2+1,numSample);
-        corr_out_plot = zeros(1,corr_per_chip_plot*2+1);
-        for subindex = 1: (corr_per_chip_plot*2)+1
-            time_stamps_plot(subindex,:) = (Spacing_plot(subindex) + remChip(svindex)) : codeFreq(svindex)/signal.Fs : ((numSample -1) * (codeFreq(svindex)/signal.Fs) + Spacing_plot(subindex) + remChip(svindex));
-            code_replicas_plot(subindex,:) = Code(svindex,ceil(time_stamps_plot(subindex,:)) + 2);
-            corr_out_plot(subindex) = sum(code_replicas_plot(subindex,:)     .*InphaseSignal);
-        end
-        %%%%%%%% PSEUDO LOS %%%%%%%%
-        for subindex = 1 : corr_per_chip_plot*2+1
-            d(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(corr_per_chip_plot+1,:));
-        end
-        %%%%%%%% INVERSE CHANNEL %%%%%%%%
-        u=last_last_u(svindex,:)'+last_u(svindex,:)'+abs(corr_out_plot(:));
-        last_last_u(svindex,:)=last_u(svindex,:);
-        last_u(svindex,:)=abs(corr_out_plot);
-
-        [channel3] = filter_rls2(u, d, lambda);
-        %%%%%%%% FIND LOS IMPULSE %%%%%%%%
-        [a_los, t_los] = max(channel3);
-        %%%%%%%% FILTERED CORRELATION FUNCTION %%%%%%%%
-        for subindex = 1 : corr_per_chip_plot*2+1
-            f_corr_out(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(corr_per_chip_plot+1+t_los-2,:));
-        end
-        E_i = f_corr_out(1,corr_per_chip_plot);  
-        L_i	= f_corr_out(1,corr_per_chip_plot+2);  
-
-%{        
-        if (detail_corr_fun == 1)
+        %%%%%%%% RLS TRACKING %%%%%%%%
+        if enable_RLS
+            %%%%%%%% HIGH RESOLUTION CORRELATOR %%%%%%%%
             time_stamps_plot = zeros(corr_per_chip_plot*2+1,numSample);
             code_replicas_plot = zeros(corr_per_chip_plot*2+1,numSample);
             corr_out_plot = zeros(1,corr_per_chip_plot*2+1);
@@ -240,17 +258,54 @@ for msIndex = 1: 2000/pdi
                 corr_out_plot(subindex) = sum(code_replicas_plot(subindex,:)     .*InphaseSignal);
             end
 
-            LS_G = zeros(numSample, (corr_per_chip_plot*2)+1);
-            for subindex = 1: (corr_per_chip_plot*2)+1%remove
-                LS_G(:, subindex) = code_replicas_plot(subindex,:);
+            %%%%%%%% PSEUDO LOS %%%%%%%%
+            for subindex = 1 : corr_per_chip_plot*2+1
+                d(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(corr_per_chip_plot+1,:));
             end
-            LS_D = InphaseSignal';
-            LS_H = inv(LS_G'*LS_G)*(LS_G'*LS_D);
-            [a_los, tau_los] = max(abs(LS_H));
-        end
-        %}
+            u=abs(corr_out_plot(:));
+            
+            %%%%%%%% INVERSE CHANNEL %%%%%%%%
+            [channel3] = filter_rls2(u, d, lambda);
 
+            %%%%%%%% FIND LOS IMPULSE %%%%%%%%
+            [a_los, t_los] = max(channel3);
+
+            %%%%%%%% FILTERED CORRELATION FUNCTION %%%%%%%%
+            for subindex = 1 : corr_per_chip_plot*2+1
+                f_corr_out(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(corr_per_chip_plot+1+t_los-2,:));
+            end
+
+            % because we have 20 correlators per chip, we select the chips with spacing 0.1
+            % do not change the P_i correlator value because it is used to demodulate the data bits
+            % the artifitial correlation function is always positive, however, the true correlation function sometimes is negative (databit=-1)
+            % here we just want to interfere in the DLL feedback using the RLS 
+            E_i = f_corr_out(1,corr_per_chip_plot-1); 
+            L_i	= f_corr_out(1,corr_per_chip_plot+3);  
+        end
+  
+
+        remChip(svindex) = t_CodePrompt(numSample) + codeFreq(svindex)/signal.Fs - signal.codelength*pdi;
+        % Implement code loop filter and generate NCO command
+        E = sqrt(E_i^2+E_q^2);
+        L = sqrt(L_i^2+L_q^2);
+        codeError(svindex) = 0.5*(E-L)/(E+L);  % DLL discriminator
+        %codeError(svindex)       = 0.5*(t_CodePrompt(1) - time_stamps_plot(corr_per_chip_plot+1+t_los-2));
+
+
+        codeNco(svindex) = code_outputLast(svindex) + (tau2code/tau1code)*(codeError(svindex)...
+                                    - DLLdiscriLast(svindex)) + codeError(svindex)* ((pdi*t)/tau1code);
+        DLLdiscriLast(svindex) = codeError(svindex);
+        code_outputLast(svindex) = codeNco(svindex);
+        codeFreq(svindex) = signal.codeFreqBasis - codeNco(svindex);
         
+        % PLL discriminator
+        carrError(svindex) = atan(P_q/P_i)/(2*pi);  % PLL discriminator
+        carrNco(svindex) = oldCarrNco(svindex) + (tau2carr/tau1carr)*(carrError(svindex) ...
+                                        - oldCarrError(svindex)) + carrError(svindex) * ((pdi*t)/tau1carr);
+        oldCarrNco(svindex) = carrNco(svindex); 
+        oldCarrError(svindex) = carrError(svindex);
+        carrFreq(svindex)  = AcqFreq(svindex) + carrNco(svindex);  % Modify carrier freq
+
         % Calculate CN0
         if (flag_snr(svindex) == 1)
             index_int(svindex) = index_int(svindex) + 1;
@@ -270,34 +325,7 @@ for msIndex = 1: 2000/pdi
         else
             save_cn0 = 0;
         end
-        
-
-
-
-        remChip(svindex) = t_CodePrompt(numSample) + codeFreq(svindex)/signal.Fs - signal.codelength*pdi;
-        % Implement code loop filter and generate NCO command
-        %E = sqrt(E_i^2+E_q^2);
-        %L = sqrt(L_i^2+L_q^2);
-        %codeError(svindex) = 0.5*(E-L)/(E+L);  % DLL discriminator
-
-        %[a_los, tau_los] = max(abs(corr_out_plot));
-        codeError(svindex)       = 0.5*(t_CodePrompt(1) - time_stamps_plot(corr_per_chip_plot+1+t_los-2));
-
-
-        codeNco(svindex) = code_outputLast(svindex) + (tau2code/tau1code)*(codeError(svindex)...
-                                    - DLLdiscriLast(svindex)) + codeError(svindex)* ((pdi*t)/tau1code);
-        DLLdiscriLast(svindex) = codeError(svindex);
-        code_outputLast(svindex) = codeNco(svindex);
-        codeFreq(svindex) = signal.codeFreqBasis - codeNco(svindex);
-        
-        % PLL discriminator
-        carrError(svindex) = atan(P_q/P_i)/(2*pi);  % PLL discriminator
-        carrNco(svindex) = oldCarrNco(svindex) + (tau2carr/tau1carr)*(carrError(svindex) ...
-                                        - oldCarrError(svindex)) + carrError(svindex) * ((pdi*t)/tau1carr);
-        oldCarrNco(svindex) = carrNco(svindex); 
-        oldCarrError(svindex) = carrError(svindex);
-        carrFreq(svindex)  = AcqFreq(svindex) + carrNco(svindex);  % Modify carrier freq
-        
+    
         
         % Data Recording
         TckResultCT(prn).P_i(msIndex)             = P_i;
@@ -319,11 +347,35 @@ for msIndex = 1: 2000/pdi
         TckResultCT(prn).codedelay(msIndex)       = mod(TckResultCT(prn).absoluteSample(msIndex)/ ...
                                                         (file.dataPrecision*file.dataType),fs*t);
         TckResultCT(prn).delayValue(msIndex)      = delayValue(svindex,msIndex);
-
-
         TckResultCT(prn).carrNco(msIndex)      = carrNco(svindex);
         if save_cn0
             TckResultCT(prn).cn0(msIndex)      = CN0_CT(snrIndex(svindex)-1,svindex);
+        end
+
+
+        % update RLS plots
+        if (svindex == 1) & enable_RLS_plot & enable_RLS
+            set(central_corr,'XData',[time_stamps_plot(corr_per_chip_plot-1,1) time_stamps_plot(corr_per_chip_plot+1,1) time_stamps_plot(corr_per_chip_plot+3,1)],'YData',[abs(corr_out_plot(corr_per_chip_plot-1)) abs(corr_out_plot(corr_per_chip_plot+1)) abs(corr_out_plot(corr_per_chip_plot+3))]);
+            set(fcentral_corr,'XData',[time_stamps_plot(corr_per_chip_plot-1,1) time_stamps_plot(corr_per_chip_plot+1,1) time_stamps_plot(corr_per_chip_plot+3,1)],'YData',[f_corr_out(1,corr_per_chip_plot-1) f_corr_out(1,corr_per_chip_plot+1) f_corr_out(1,corr_per_chip_plot+3)]);
+            set(fcorr_func,'XData',time_stamps_plot(:,1),'YData',f_corr_out(1,:));
+            set(corr_function,'XData',time_stamps_plot(:,1),'YData',abs(corr_out_plot));
+            set(invCH,'XData',(-1/corr_per_chip_plot:1/corr_per_chip_plot:1-1/corr_per_chip_plot),'YData',channel3);
+            set(los_imp,'XData',(-1/corr_per_chip_plot+(1/corr_per_chip_plot)*(t_los-1)),'YData',a_los);
+            set(pdllDiscr,'XData',(1:1:msIndex),'YData',TckResultCT(prn).codeError(1:1:msIndex));
+
+            pause(0.01);
+        end
+
+        
+        % update freq variation plots
+        if (enable_freq_plot & (svindex == 1) & (msIndex > 1) )
+            carrfreq_variation(1,msIndex) = TckResultCT(prn).carrFreq(msIndex)-TckResultCT(prn).carrFreq(msIndex-1);
+            codefreq_variation(1,msIndex) = TckResultCT(prn).codeFreq(msIndex)-TckResultCT(prn).codeFreq(msIndex-1);
+            if enable_freq_plot
+                set(carr_freq_plot,'XData',(1:1:msIndex),'YData',carrfreq_variation(1,1:1:msIndex));
+                set(code_freq_plot,'XData',(1:1:msIndex),'YData',codefreq_variation(1,1:1:msIndex)); 
+            end
+            pause(0.01);
         end
         
     end % end for svindex in Tracking

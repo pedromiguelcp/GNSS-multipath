@@ -35,19 +35,12 @@ datalength = track.msEph;
 delayValue = zeros(length(Acquired.sv),datalength);
 noiseCNOfromSNR = zeros(1,datalength);
 CN0fromSNR = zeros(1,datalength);
-G = zeros((corr_per_chip_plot*2+1),(corr_per_chip_plot*2+1));
-g = zeros((corr_per_chip_plot*2+1),1);
 
 detail_corr_fun = 0;
 just_multipath = 0;
 no_plots = 0;
-
-%MEDLL
-MEDLL_track = 0;
-multipaths=0;
-val = zeros(1,multipaths+1);
-idx = zeros(1,multipaths+1);
-convergence_it = 0;
+last_carrier_feq = 0;
+carrier_freq_variation = zeros(1,datalength);
 
 for svindex = 1:length(Acquired.sv)
     remChip = 0;
@@ -164,83 +157,7 @@ for svindex = 1:length(Acquired.sv)
             else
                 CN0_CT_plot(1,Index) = 0;
             end
-            
-
-            LS_G = zeros(numSample, (corr_per_chip_plot*2)+1);
-            for subindex = 1: (corr_per_chip_plot*2)+1%remove
-                LS_G(:, subindex) = code_replicas_plot(subindex,:);
-            end
-            LS_D = InphaseSignal';
-            LS_H = inv(LS_G'*LS_G)*(LS_G'*LS_D);
-            [a_los, tau_los] = max(abs(LS_H));
         end
-        %% *********** %%
-        %derivatives = zeros(1,corr_per_chip_plot*2);
-        %for subindex = 2 : corr_per_chip_plot*2
-        %    derivatives(1,subindex) = corr_out_plot(subindex)-corr_out_plot(subindex-1);
-        %end
-        %figure;
-        %plot(derivatives);
-
-
-
-
-
-
-
-
-        %{
-            if MEDLL_track == 1
-            for i = 0 : multipaths
-    
-                while convergence_it < 20
-            
-                    %step 1
-                    corr_out_MEDLL = abs(corr_out_plot);
-                    for k = 0 : i-1
-                        for corridx = 2: (corr_per_chip_plot*2)
-                            cross_corr = sum(code_replicas_plot(corridx,:).*code_replicas_plot(idx(k+1),:));
-                            corr_out_MEDLL(corridx) = corr_out_MEDLL(corridx) - cross_corr*val(k+1)/numSample;
-                        end
-                    end
-                    
-                    %step 2
-                    [val(i+1), idx(i+1)] = max(corr_out_MEDLL);
-            
-                    %step 3
-                    for k = 0 : i-1
-                        corr_out_MEDLL = abs(corr_out_plot);
-                        for l = 0 : i
-                            if l ~= k
-                                for corridx = 2: (corr_per_chip_plot*2)
-                                    cross_corr = sum(code_replicas_plot(corridx,:).*code_replicas_plot(idx(l+1),:));
-                                    corr_out_MEDLL(corridx) = corr_out_MEDLL(corridx) - cross_corr*val(l+1)/numSample;
-                                end
-                            end
-                        end
-                        [val(k+1), idx(k+1)] = max(corr_out_MEDLL);
-                    end
-    
-                    
-    
-                    %step 4, change to find convergence
-                    convergence_it = convergence_it + 1;
-                end
-                %convergence epoch results
-                for j = 0 : i
-                    X = sprintf('MEDLL -> Peak %d: Amplitude = %.2f  Delay = %.2f',j, val(j+1)/numSample,(-1+idx(j+1)*1/corr_per_chip_plot));
-                    disp(X) 
-                end
-                
-                convergence_it = 0;
-            end
-        end
-%}
-
-
-
-
-
         
         remChip   = (t_CodePrompt(numSample) + codeFreq/signal.Fs) - signal.codeFreqBasis*signal.ms;
         
@@ -249,8 +166,6 @@ for svindex = 1:length(Acquired.sv)
         E               = sqrt(E_i^2+E_q^2);
         L               = sqrt(L_i^2+L_q^2);
         DLLdiscri       = 0.5 * (E-L)/(E+L);
-        %[a_los, tau_los] = max(abs(corr_out_plot));
-        %DLLdiscri       = t_CodePrompt(1) - time_stamps_plot(tau_los);
         
         code_output     = code_outputLast + (tau2code/tau1code)*(DLLdiscri - DLLdiscriLast) + DLLdiscri* (0.001/tau1code);
         DLLdiscriLast   = DLLdiscri;
@@ -262,7 +177,9 @@ for svindex = 1:length(Acquired.sv)
         carrier_output      = carrier_outputLast + (tau2carr/tau1carr)*(PLLdiscri - PLLdiscriLast) + PLLdiscri * (0.001/tau1carr);
         carrier_outputLast  = carrier_output;  
         PLLdiscriLast       = PLLdiscri;
+        last_carrier_feq    = carrierFreq;
         carrierFreq         = carrierFreqBasis + carrier_output;  % Modify carrier freq based on NCO command
+        carrier_freq_variation(1,Index) = carrierFreq-last_carrier_feq;
         
         % Data Record
         TckResultCT(Acquired.sv(svindex)).P_i(Index)            = P_i;
@@ -298,14 +215,14 @@ for svindex = 1:length(Acquired.sv)
                 xlabel('Delay [chips]')
                 title('Correlation function')
                 xlim([-1 1])
-                %ylim([0 10000])
+                ylim([-1.2 1.2])
                 hold on;
                 % plot initial position of central correlators and filter peak
                 %p1=plot(Spacing(1:1:3),[abs(E_i) abs(P_i) abs(L_i)],'*','Color',"#77AC30",'DisplayName','Central correlators (E, P, L)');
                 p1=plot(Spacing(1:1:3),[E_i P_i L_i]./max(abs(corr_out_plot)),'*','Color',"#77AC30",'DisplayName','Central correlators (E, P, L)');
-                yyaxis right
-                ls=plot(Spacing_plot(1 : 1 : corr_per_chip_plot*2+1), LS_H,'-','DisplayName','Least Squares');
-                peak_ls=plot([Spacing_plot(tau_los) Spacing_plot(tau_los)], [LS_H(tau_los) 0],'r-','DisplayName','Estimated Peak');
+                    %yyaxis right
+                    %ls=plot(Spacing_plot(1 : 1 : corr_per_chip_plot*2+1), LS_H,'-','DisplayName','Least Squares');
+                    %peak_ls=plot([Spacing_plot(tau_los) Spacing_plot(tau_los)], [LS_H(tau_los) 0],'r-','DisplayName','Estimated Peak');
                 % plot multipath information
                 legend
                 drawnow
@@ -315,7 +232,8 @@ for svindex = 1:length(Acquired.sv)
                 xlabel('Epochs (ms)')
                 title('DLL corrections')
                 subplot(3,2,4);
-                pll_discri=plot((1 : 1 : Index), TckResultCT(Acquired.sv(svindex)).PLLdiscri(1 : 1 : Index),'-','Color',"#7E2F8E");
+                    %pll_discri=plot((1 : 1 : Index), TckResultCT(Acquired.sv(svindex)).PLLdiscri(1 : 1 : Index),'-','Color',"#7E2F8E");
+                pll_discri=plot((1 : 1 : Index), carrier_freq_variation(1 : 1 : Index),'-','Color',"#7E2F8E");
                 ylabel('PLL discriminator')
                 xlabel('Epochs (ms)')
                 title('PLL corrections')
@@ -326,10 +244,11 @@ for svindex = 1:length(Acquired.sv)
                 i_corr=plot((1 : 1 : Index), TckResultCT(Acquired.sv(svindex)).P_i(1 : 1 : Index),'g-','DisplayName','Ip');
                 hold on;
                 q_corr=plot((1 : 1 : Index), TckResultCT(Acquired.sv(svindex)).P_q(1 : 1 : Index),'b-','DisplayName','Qp');
+                legend
                 yyaxis right
-                ylabel('CN0','Color','y')
-                cn0=plot((1 : 1 : Index), CN0fromSNR(1, 1 : 1 : Index),'b-','Color',"#EDB120",'DisplayName','CN0');
-                cn01=plot((1 : 1 : Index), CN0_CT_plot(1, 1 : 1 : Index),'b-','Color',"#EDB120");
+                ylabel('CN0','Color','#D95319')
+                cn0=plot((1 : 1 : Index), CN0fromSNR(1, 1 : 1 : Index),'b-','Color',"#D95319",'DisplayName','CN0');
+                %cn01=plot((1 : 1 : Index), CN0_CT_plot(1, 1 : 1 : Index),'b-','Color',"#EDB120");
                 xlabel('Epochs (ms)')
                 title('In-phase Quatradure magnitude')
 
@@ -346,17 +265,16 @@ for svindex = 1:length(Acquired.sv)
                 set(p1,'XData',[t_CodeEarly(1) t_CodePrompt(1) t_CodeLate(1)],'YData',[E_i P_i L_i]./max(abs(corr_out_plot)));
                 %set(corr_function,'XData',time_stamps_plot(2 : 1 : corr_per_chip_plot*2,1),'YData',abs(corr_out_plot(2 : 1 : corr_per_chip_plot*2))/max(corr_out_plot));
                 set(corr_function,'XData',time_stamps_plot(2 : 1 : corr_per_chip_plot*2,1),'YData',corr_out_plot(2 : 1 : corr_per_chip_plot*2)/max(abs(corr_out_plot)));
-                set(ls,'XData',time_stamps_plot(1 : 1 : corr_per_chip_plot*2+1,1),'YData',LS_H);
-                set(peak_ls,'XData',[time_stamps_plot(tau_los) time_stamps_plot(tau_los)],'YData',[LS_H(tau_los) 0]);
                 
                 set(dll_discri,'XData',(1 : 1 : Index),'YData',TckResultCT(Acquired.sv(svindex)).DLLdiscri(1 : 1 : Index));
                 
-                set(pll_discri,'XData',(1 : 1 : Index),'YData',TckResultCT(Acquired.sv(svindex)).PLLdiscri(1 : 1 : Index));
+                    %set(pll_discri,'XData',(1 : 1 : Index),'YData',TckResultCT(Acquired.sv(svindex)).PLLdiscri(1 : 1 : Index));
+                set(pll_discri,'XData',(1 : 1 : Index),'YData',carrier_freq_variation(1 : 1 : Index));
                 drawnow
                 set(i_corr,'XData',(1 : 1 : Index),'YData',TckResultCT(Acquired.sv(svindex)).P_i(1 : 1 : Index));
                 set(q_corr,'XData',(1 : 1 : Index),'YData',TckResultCT(Acquired.sv(svindex)).P_q(1 : 1 : Index));
                 set(cn0,'XData',(1 : 1 : Index),'YData',CN0fromSNR(1, 1 : 1 : Index));
-                set(cn01,'XData',(1 : 1 : Index),'YData',CN0_CT_plot(1, 1 : 1 : Index));
+                    %set(cn01,'XData',(1 : 1 : Index),'YData',CN0_CT_plot(1, 1 : 1 : Index));
 
                 set(code_delay_plot,'XData',(1 : 1 : Index),'YData',TckResultCT(Acquired.sv(svindex)).codedelay(1 : 1 : Index));
                 drawnow

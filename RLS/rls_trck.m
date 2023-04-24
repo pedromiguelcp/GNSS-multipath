@@ -3,7 +3,7 @@ close all;
 clc;
 % Define the parameters for the simulation
 c = 299792458; % m/s
-fs = 12500000; % Sample rate (Hz)
+fs = 26000000; % Sample rate (Hz)
 codeFreqBasis = 1.023e6; % C/A code rate (chips/s)
 codeFreq = codeFreqBasis;
 codelength = 1023;
@@ -57,6 +57,10 @@ trigger_new_corr_func = 0;
 trigger_new_los = 0;
 move_los=0;
 
+noise_power=4;
+
+load(['ibaseband.mat']);
+
 for Index = 1: epochs
     % section used to change the multipath and LOS position during simulation
     if Index <= 50
@@ -73,18 +77,15 @@ for Index = 1: epochs
 
     %%%%%%% CODE TRACKING %%%%%%%%
     %numSample = round((codelength-remChip)/(codeFreq/fs)); 
-    if Index == 1
-        LOS_Code = Spacing(P) : codeFreqBasis/fs : ((numSample -1) * (codeFreqBasis/fs) + Spacing(P));
-    else
-        LOS_Code = Spacing(P)+move_los: codeFreqBasis/fs : ((numSample -1) * (codeFreqBasis/fs) + Spacing(P))+move_los;
-    end
-    INCode   = Code(ceil(LOS_Code) + 2);
+    LOS_Code = Spacing(P)+move_los: codeFreqBasis/fs : ((numSample -1) * (codeFreqBasis/fs) + Spacing(P))+move_los;
+    INCode   = Code(ceil(LOS_Code) + 2) + noise_power.*randn(1,numSample);
 
     %interference injection
     for subindex = 1: size(mltpth_delays, 2)
         multipath = Spacing(P) + mltpth_delays(subindex) +move_los: codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + mltpth_delays(subindex))+move_los;
-        INCode = INCode + Code(ceil(multipath) + 2)./mltpth_attenuation(subindex);
+        INCode = INCode + Code(ceil(multipath) + 2)./mltpth_attenuation(subindex) + noise_power.*randn(1,numSample);
     end
+    %INCode = iBasebandSignal; % from FGI receiver real data where the RLS performs poorly
 
     %correlator engine
     for subindex = 1: (corr_per_chip*2)+1
@@ -151,21 +152,24 @@ for Index = 1: epochs
     %%%%%%%%%%%%%%%%%%% PLOTS %%%%%%%%%%%%%%%%%%%%%%%%
     if(Index == 1) 
         % plot initial correlation output
+        colororder({'[0.4660 0.6740 0.1880]','#D95319'})
         response = figure(1);
         subplot(2,2,1:2);
-        p0=plot(time_stamps(:,1), corr_out./numSample,'-','DisplayName','Raw corr. func.' ,'Color',"#77AC30");
-        ylim([-0.1 8])
+        yyaxis left
+        p0=plot(time_stamps(:,1), corr_out,'-','DisplayName','Raw corr. func.' ,'Color',"#77AC30");
+        %ylim([-0.1 8])
         xlim([-1.5 1.5])
-        ylabel('Normalized Amplitude')
+        ylabel('Amplitude')
         xlabel('Delay [chips]')
         title('Raw Correlation function')
         hold on;
         % plot raw corr func - central correlators
-        p1=plot(time_stamps(VE : 1 : VL,1),corr_out(VE : 1 : VL)./numSample,'*','HandleVisibility','off' ,'Color',"#77AC30");
+        p1=plot(time_stamps(VE : 1 : VL,1),corr_out(VE : 1 : VL),'*','HandleVisibility','off' ,'Color',"#77AC30");
         % plot filtered corr func
-        p2=plot(time_stamps(:, 1), f_corr_out./numSample,'-','DisplayName','Artificial corr. func.' ,'Color',"#D95319");
+        yyaxis right
+        p2=plot(time_stamps(:, 1), f_corr_out,'-','DisplayName','Artificial corr. func.' ,'Color',"#D95319");
         % plot filtered corr func - central correlators
-        p3=plot(time_stamps(VE : 1 : VL,1), f_corr_out(VE : 1 : VL)./numSample,'*','HandleVisibility','off','Color',"#D95319"); 
+        p3=plot(time_stamps(VE : 1 : VL,1), f_corr_out(VE : 1 : VL),'*','HandleVisibility','off','Color',"#D95319"); 
         legend
         % plot multipath information
         p4=plot([0 0],[1 0],'-bo','HandleVisibility','off');
@@ -184,11 +188,11 @@ for Index = 1: epochs
         drawnow
     else
         if trigger_new_corr_func
-            set(p0,'XData',time_stamps(:,1),'YData',corr_out./numSample);
+            set(p0,'XData',time_stamps(:,1),'YData',corr_out);
         end
-        set(p1,'XData',time_stamps(VE : 1 : VL,1),'YData',corr_out(VE : 1 : VL)./numSample);
-        set(p2,'XData',time_stamps(:,1),'YData',f_corr_out./numSample);
-        set(p3,'XData',time_stamps(VE : 1 : VL,1),'YData',f_corr_out(VE : 1 : VL)./numSample);
+        set(p1,'XData',time_stamps(VE : 1 : VL,1),'YData',corr_out(VE : 1 : VL));
+        set(p2,'XData',time_stamps(:,1),'YData',f_corr_out);
+        set(p3,'XData',time_stamps(VE : 1 : VL,1),'YData',f_corr_out(VE : 1 : VL));
         if trigger_new_los
             set(p4,'XData',[move_los move_los],'YData',[1 0]);
         end
