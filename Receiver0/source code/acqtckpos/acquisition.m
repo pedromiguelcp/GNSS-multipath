@@ -14,7 +14,6 @@ function  Acquired = acquisition(file,signal,acq)
 % 
 % Written by B. XU and L. T. HSU
 
-
 %% Initialization 
 Acquired.sv = []; 
 Acquired.SNR = []; 

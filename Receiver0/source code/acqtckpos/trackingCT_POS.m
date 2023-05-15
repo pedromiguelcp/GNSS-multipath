@@ -35,7 +35,7 @@ sv      = Acquired.sv;
 f0      = signal.codeFreqBasis;
 fL1     = signal.Fc;
 fs      = signal.Fs ;
-pdi     = track.pdi; 
+pdi     = 1; 
 t       = signal.ms;
 svlength    = length(sv);
 datalength  = track.msToProcessCT;
@@ -83,6 +83,7 @@ for svindex = 1:length(sv)
     prn                     = sv(svindex);
     codetemp                = generateCAcode(prn);
     Code(svindex,:)         = [codetemp(end-1) codetemp(end) repmat(codetemp,1,pdi) codetemp(1)];
+    Code_plot(svindex,:)         = [codetemp(end-6) codetemp(end-5) codetemp(end-4) codetemp(end-3) codetemp(end-2) codetemp(end-1) codetemp(end) repmat(codetemp,1,pdi) codetemp(1) codetemp(2) codetemp(3) codetemp(4) codetemp(5) codetemp(6)];
     AcqCodeDelay(svindex)   = Acquired.codedelay(svindex);
     file_ptr(svindex)       = signal.Sample - AcqCodeDelay(svindex) -1 + file.skip *fs*t;  
     carrFreq(svindex)       = Acquired.fineFreq(svindex);
@@ -123,44 +124,118 @@ phase_beta             = zeros(1,svlength);
 
 
 %% *******RLS variables******** %%
-corr_per_chip_plot = 20;
-lambda=0.95;
-d = zeros(1,(corr_per_chip_plot*2+1));
-u = zeros(1,(corr_per_chip_plot*2+1));
-channel3 = zeros(1,corr_per_chip_plot*2+1);
-Spacing_plot = zeros(1,corr_per_chip_plot*2+1);
-for Index = 1: (corr_per_chip_plot*2+1)
-    Spacing_plot(Index) = -1 + (Index-1)/corr_per_chip_plot;
+corr_per_chip_plot = 10;
+one_side_chip = 1;
+one_side_corr = floor(corr_per_chip_plot*one_side_chip);
+total_corr = corr_per_chip_plot*one_side_chip*2+1;
+lambda=0.98;
+d = zeros(1,total_corr);
+channel3 = zeros(ceil((length(d)+1)/2),1);
+u = zeros(1,total_corr);
+Spacing_plot = zeros(1,total_corr);
+for Index = 1: total_corr
+    Spacing_plot(Index) = -one_side_chip + (Index-1)/corr_per_chip_plot;
 end
+corr_out_plot = zeros(1,total_corr);
 
-enable_RLS=1;
-enable_RLS_plot=1;
+enable_RLS = 0;
+enable_RLS_plot = 0;
 save_cn0 = 0;
 numSample = round((signal.codelength*pdi)/(f0/signal.Fs));
 
+
+enable_RLS_compensation_plot = 0;
+if enable_RLS_compensation_plot
+    colororder({'[0.4660 0.6740 0.1880]','#D95319'})
+    corr_func = figure(1);
+    subplot(5,3,1:3);
+    yyaxis left
+    p0=plot(Spacing_plot, zeros(1,total_corr),'*-','Color',"#77AC30",'DisplayName','Raw Correlation');
+    ylabel('Amplitude');
+    xlabel('Delay [chips]');
+    title('Correlation function');
+    %ylim([0 10000])
+    xlim([-1.5 1.5])
+    hold on;
+    yyaxis right
+    p0_0=plot(Spacing_plot, zeros(1,total_corr),'*-','Color',"#D95319",'DisplayName','Ideal Correlation');
+    legend
+
+    subplot(5,3,4);
+    p1=plot(zeros(1,1),zeros(1,1),'-*');
+    ylabel('Amplitude');
+    xlabel('Delay [chips]');
+    title('Channel Impulse Response');
+    ylim([-1 1])
+
+    subplot(5,3,5);
+    p2=plot(Spacing_plot,zeros(1,total_corr),'-*');
+    ylabel('Amplitude');
+    xlabel('Delay [chips]');
+    title('Correlation Function from Impulse Response');
+    %ylim([0 10000])
+    xlim([-1.5 1.5])  
+
+    subplot(5,3,7);
+    p3=plot(zeros(1,1),zeros(1,1),'-*');
+    ylabel('Amplitude');
+    xlabel('Delay [chips]');
+    title('New Channel Impulse Response');
+    %ylim([-1 1])
+
+    subplot(5,3,8);
+    p4=plot(Spacing_plot,zeros(1,total_corr),'-*');
+    ylabel('Amplitude');
+    xlabel('Delay [chips]');
+    title('Multipath Correlation Function');
+    %ylim([0 10000])
+    xlim([-1.5 1.5])  
+    
+    subplot(5,3,10:12);
+    p5=plot(Spacing_plot,zeros(1,total_corr),'-*');
+    ylabel('Amplitude');
+    xlabel('Delay [chips]');
+    title('Multipath-free Correlation Function');
+    %ylim([0 20000])
+    xlim([-1.5 1.5])  
+
+    subplot(5,3,[6 9]);
+    p6=plot(zeros(1,1),zeros(1,1),'-*');
+    ylabel('Error');
+    xlabel('Nº multipaths');
+    title('Impulse Response Size - RMSE');
+
+    subplot(5,3,13:15);
+    p7=plot(Spacing_plot,zeros(1,total_corr),'-*');
+    ylabel('Amplitude');
+    xlabel('Delay [chips]');
+    title('Multipath-free Correlation Function v2');
+    %ylim([0 20000])
+    xlim([-1.5 1.5])
+end
 if enable_RLS_plot
     colororder({'[0.4660 0.6740 0.1880]','#D95319'})
     corr_func = figure(1);
     subplot(2,2,1:2)
     yyaxis left
-    corr_function=plot(Spacing_plot, zeros(1,corr_per_chip_plot*2+1),'*-','Color',"#77AC30",'DisplayName','Raw Correlation');
+    corr_function=plot(Spacing_plot, zeros(1,total_corr),'*-','Color',"#77AC30",'DisplayName','Raw Correlation');
     ylabel('Normalized Amplitude');
     xlabel('Delay [chips]');
     title('Correlation function');
     ylim([0 10000])
     xlim([-1.5 1.5])
     hold on;
-    central_corr=plot(Spacing_plot(corr_per_chip_plot:1:corr_per_chip_plot+2), zeros(1,3),'*-','Color',"#0072BD",'HandleVisibility','off');
+    central_corr=plot(Spacing_plot(one_side_corr:1:one_side_corr+2), zeros(1,3),'*-','Color',"#0072BD",'HandleVisibility','off');
     yyaxis right
-    fcorr_func=plot(Spacing_plot, zeros(1,corr_per_chip_plot*2+1),'*-','Color',"#D95319",'DisplayName','Artifitial Correlation');
-    fcentral_corr=plot(Spacing_plot(corr_per_chip_plot:1:corr_per_chip_plot+2), zeros(1,3),'*-','Color',"#0072BD",'HandleVisibility','off');
+    fcorr_func=plot(Spacing_plot, zeros(1,total_corr),'*-','Color',"#D95319",'DisplayName','Artifitial Correlation');
+    fcentral_corr=plot(Spacing_plot(one_side_corr:1:one_side_corr+2), zeros(1,3),'*-','Color',"#0072BD",'HandleVisibility','off');
     ylim([0 (numSample+1000)])
     xlim([-1.5 1.5])
     legend
     drawnow
     subplot(2,2,3)
     legend
-    invCH=plot((-1/corr_per_chip_plot:1/corr_per_chip_plot:1-1/corr_per_chip_plot),zeros(1,corr_per_chip_plot+1),'-*','Color',"#0072BD",'HandleVisibility','off');
+    invCH=plot((-1/corr_per_chip_plot:1/corr_per_chip_plot:one_side_chip-1/corr_per_chip_plot),zeros(1,one_side_corr+1),'-*','Color',"#0072BD",'HandleVisibility','off');
     ylabel('Amplitude');
     xlabel('H');
     title('INVERSE CHANNEL');
@@ -195,7 +270,6 @@ if enable_freq_plot
     ylim([-2 2]);
     drawnow  
 end
-
     
 h = waitbar(0,['Conventional Tracking, Length: ',num2str(datalength),' ms,', '  Please wait...']);
 %%
@@ -249,40 +323,77 @@ for msIndex = 1: 2000/pdi
         %%%%%%%% RLS TRACKING %%%%%%%%
         if enable_RLS
             %%%%%%%% HIGH RESOLUTION CORRELATOR %%%%%%%%
-            time_stamps_plot = zeros(corr_per_chip_plot*2+1,numSample);
-            code_replicas_plot = zeros(corr_per_chip_plot*2+1,numSample);
-            corr_out_plot = zeros(1,corr_per_chip_plot*2+1);
-            for subindex = 1: (corr_per_chip_plot*2)+1
+            time_stamps_plot = zeros(total_corr,numSample);
+            code_replicas_plot = zeros(total_corr,numSample);
+            for subindex = 1: total_corr
                 time_stamps_plot(subindex,:) = (Spacing_plot(subindex) + remChip(svindex)) : codeFreq(svindex)/signal.Fs : ((numSample -1) * (codeFreq(svindex)/signal.Fs) + Spacing_plot(subindex) + remChip(svindex));
-                code_replicas_plot(subindex,:) = Code(svindex,ceil(time_stamps_plot(subindex,:)) + 2);
-                corr_out_plot(subindex) = sum(code_replicas_plot(subindex,:)     .*InphaseSignal);
+                code_replicas_plot(subindex,:) = Code_plot(svindex,ceil(time_stamps_plot(subindex,:)) + 7);
+                corr_out_plot(subindex) = sum(code_replicas_plot(subindex,:).*InphaseSignal);% + sum(code_replicas_plot(subindex,:).*QuadratureSignal);
             end
 
-            %%%%%%%% PSEUDO LOS %%%%%%%%
-            for subindex = 1 : corr_per_chip_plot*2+1
-                d(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(corr_per_chip_plot+1,:));
+
+
+            u=abs(corr_out_plot);
+            for subindex = 1 : total_corr
+                d(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(one_side_corr+1,:));
             end
-            u=abs(corr_out_plot(:));
+            for multp_num = 1 : 40
+                [ch_imp_resp] = filter_rls(u, d, lambda, multp_num);
+                corr=conv(d,ch_imp_resp);
+                %corr=corr(:);
+                x_corr_out=corr(1:1:total_corr);
+                if size(x_corr_out,1) ~= size(u,1)
+                    x_corr_out=x_corr_out';
+                end
+                rmse(1,multp_num) = sqrt(mean((u(1:1:end) - x_corr_out(1:1:end)).^2));
+            end
+            [a0, t0] = min(rmse);
+            %t0=5;
+            [ch_imp_resp0] = filter_rls(u, d, lambda, t0);
+            corr0=conv(d,ch_imp_resp0(1:1:end));
+            ch_imp_resp1 = ch_imp_resp0;
+            ch_imp_resp1(1) = 0;
+            corr1=conv(d,ch_imp_resp1(1:1:end));
+            %corr=corr(:);
+            x_corr_out=corr1(1:1:total_corr);
+            for subindex = 1: total_corr
+                new_corr(subindex) = u(subindex) - x_corr_out(subindex);
+            end
+            % MULTIPATH COMPENSATION v2
+            new_corr1 = u';
+            for subindex = 2 : length(ch_imp_resp1)
+                if (ch_imp_resp1(subindex) > 0) & (subindex <= 3)
+                    for subindex1 = 1: total_corr
+                        xd(subindex1,1) = sum(code_replicas_plot(subindex1,:).*code_replicas_plot(corr_per_chip_plot+subindex,:));
+                    end
+                    new_corr1 = new_corr1 - xd.*ch_imp_resp1(subindex);
+                end
+            end
+
+
+
             
-            %%%%%%%% INVERSE CHANNEL %%%%%%%%
-            [channel3] = filter_rls2(u, d, lambda);
-
-            %%%%%%%% FIND LOS IMPULSE %%%%%%%%
-            [a_los, t_los] = max(channel3);
-
-            %%%%%%%% FILTERED CORRELATION FUNCTION %%%%%%%%
-            for subindex = 1 : corr_per_chip_plot*2+1
-                f_corr_out(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(corr_per_chip_plot+1+t_los-2,:));
-            end
-
-            % because we have 20 correlators per chip, we select the chips with spacing 0.1
+            % because we have 20 correlators per chip, we select the chips with spacing 0.1 (corr_per_chip_plot-1,corr_per_chip_plot+3)
             % do not change the P_i correlator value because it is used to demodulate the data bits
             % the artifitial correlation function is always positive, however, the true correlation function sometimes is negative (databit=-1)
             % here we just want to interfere in the DLL feedback using the RLS 
-            E_i = f_corr_out(1,corr_per_chip_plot-1); 
-            L_i	= f_corr_out(1,corr_per_chip_plot+3);  
+            %E_i = new_corr(1,one_side_corr-1); 
+            %L_i = new_corr(1,one_side_corr+3);
+            %E_i = new_corr_out(1,one_side_corr); 
+            %L_i = new_corr_out(1,one_side_corr+2);  
         end
-  
+        if (svindex == 6) & enable_RLS_compensation_plot
+            set(p0,'XData',time_stamps_plot(:,1),'YData',abs(corr_out_plot));
+            set(p0_0,'XData',time_stamps_plot(:,1),'YData',d);
+            set(p1,'XData',(0:1/corr_per_chip_plot:(1/corr_per_chip_plot)*(t0-1)),'YData',ch_imp_resp0);
+            set(p2,'XData',time_stamps_plot(:,1),'YData',corr0(1:1:total_corr));
+            set(p3,'XData',(0:1/corr_per_chip_plot:(1/corr_per_chip_plot)*(t0-1)),'YData',ch_imp_resp1);
+            set(p4,'XData',time_stamps_plot(:,1),'YData',x_corr_out);
+            set(p5,'XData',time_stamps_plot(:,1),'YData',new_corr);
+            set(p6,'XData',(1:1:40),'YData',rmse);
+            set(p7,'XData',time_stamps_plot(:,1),'YData',new_corr1);
+            pause(0.01);
+        end
 
         remChip(svindex) = t_CodePrompt(numSample) + codeFreq(svindex)/signal.Fs - signal.codelength*pdi;
         % Implement code loop filter and generate NCO command
@@ -355,11 +466,11 @@ for msIndex = 1: 2000/pdi
 
         % update RLS plots
         if (svindex == 1) & enable_RLS_plot & enable_RLS
-            set(central_corr,'XData',[time_stamps_plot(corr_per_chip_plot-1,1) time_stamps_plot(corr_per_chip_plot+1,1) time_stamps_plot(corr_per_chip_plot+3,1)],'YData',[abs(corr_out_plot(corr_per_chip_plot-1)) abs(corr_out_plot(corr_per_chip_plot+1)) abs(corr_out_plot(corr_per_chip_plot+3))]);
-            set(fcentral_corr,'XData',[time_stamps_plot(corr_per_chip_plot-1,1) time_stamps_plot(corr_per_chip_plot+1,1) time_stamps_plot(corr_per_chip_plot+3,1)],'YData',[f_corr_out(1,corr_per_chip_plot-1) f_corr_out(1,corr_per_chip_plot+1) f_corr_out(1,corr_per_chip_plot+3)]);
-            set(fcorr_func,'XData',time_stamps_plot(:,1),'YData',f_corr_out(1,:));
+            set(central_corr,'XData',[time_stamps_plot(one_side_corr-1,1) time_stamps_plot(one_side_corr+1,1) time_stamps_plot(one_side_corr+3,1)],'YData',[abs(corr_out_plot(one_side_corr-1)) abs(corr_out_plot(one_side_corr+1)) abs(corr_out_plot(one_side_corr+3))]);
+            set(fcentral_corr,'XData',[time_stamps_plot(one_side_corr-1,1) time_stamps_plot(one_side_corr+1,1) time_stamps_plot(one_side_corr+3,1)],'YData',[f_corr_out(1,one_side_corr-1) f_corr_out(1,one_side_corr+1) f_corr_out(1,one_side_corr+3)]);
+            %set(fcorr_func,'XData',time_stamps_plot(:,1),'YData',f_corr_out(1,:));
             set(corr_function,'XData',time_stamps_plot(:,1),'YData',abs(corr_out_plot));
-            set(invCH,'XData',(-1/corr_per_chip_plot:1/corr_per_chip_plot:1-1/corr_per_chip_plot),'YData',channel3);
+            set(invCH,'XData',(-1/corr_per_chip_plot:1/corr_per_chip_plot:one_side_chip-1/corr_per_chip_plot),'YData',channel3(:,1));
             set(los_imp,'XData',(-1/corr_per_chip_plot+(1/corr_per_chip_plot)*(t_los-1)),'YData',a_los);
             set(pdllDiscr,'XData',(1:1:msIndex),'YData',TckResultCT(prn).codeError(1:1:msIndex));
 
@@ -567,18 +678,12 @@ close(h);
 save(['navSolCT_',file.fileName], 'navSolutionsCT','eph','TOW_USR_CT');
 save(['tckRstCT_',file.fileName], 'TckResultCT','CN0_CT'); 
 
-function [h] = filter_rls2(u, d, lambda)
+function [h] = filter_rls(u, d, lambda, M)
   
     N=length(d);%number of correlators
     d=d(:);
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    % Multipath is just the inverse system
-    for i=1:1
-        d=[d; 0];
-        u=[0; u];
-    end
-    M=ceil(length(d)/2);
+    %M=ceil(length(d)/2);
     delta=0.005;
     P = eye(M)/delta;
     uvec=zeros(M,1);
@@ -594,7 +699,6 @@ function [h] = filter_rls2(u, d, lambda)
         h=h+kappa*conj(e);
         P = lambda^(-1)*P-lambda^(-1)*kappa*uvec'*P;
     end
-
-    %imp=conv(w,h);%must be (approaches) de impulse function
 end
+
 end

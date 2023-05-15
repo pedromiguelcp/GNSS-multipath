@@ -13,7 +13,7 @@ code_outputLast = 0;
 DLLdiscriLast = 0;
 cross_corr = 0;
 
-corr_per_chip = 20;
+corr_per_chip = 10;
 Spacing = zeros(corr_per_chip*2+1);
 time_stamps = zeros(corr_per_chip*2+1,numSample);
 code_replicas = zeros(corr_per_chip*2+1,numSample);
@@ -48,8 +48,10 @@ Code = generateCAcode(1); % Generate C/A code for satellite 1
 Code = [Code(end-1) Code(end) Code Code(1) Code(2) Code(3)];%enable replica slidding
 
 %rls params
-channel3 = zeros(1,corr_per_chip*2+1);
 d = zeros(1,(corr_per_chip*2+1));
+channel3 = zeros(ceil((length(d)+1)/2),1);
+delta=0.005;
+P_rls = eye(ceil((length(d)+1)/2))/delta;
 lambda=0.95;
 a_los=zeros(1,epochs);
 t_los=zeros(1,epochs);
@@ -57,13 +59,13 @@ trigger_new_corr_func = 0;
 trigger_new_los = 0;
 move_los=0;
 
-noise_power=4;
-
+noise_power=0;
+rmse = zeros(1,corr_per_chip*2+1);
 load(['ibaseband.mat']);
 
 for Index = 1: epochs
     % section used to change the multipath and LOS position during simulation
-    if Index <= 50
+    if Index <= 500
         mltpth_delays=chan3.delays;
         mltpth_attenuation=chan3.attenuation;
     elseif Index <= 100
@@ -100,6 +102,17 @@ for Index = 1: epochs
     %corr_out=corr_out+std(corr_out)*randn(1,21)/10;
 
     remChip   = (time_stamps(P,numSample) + codeFreq/fs) - codeFreqBasis*0.001;
+    u=corr_out';
+    for ind = 1 : corr_per_chip*2+1
+        for subindex = 1 : corr_per_chip*2+1
+            d(1,subindex) = sum(code_replicas(subindex,:).*code_replicas(ind,:));
+        end
+        rmse(1,ind) = sqrt(mean((u - d).^2));
+    end
+    [a_los, t_los] = min(rmse);
+    for subindex = 1 : corr_per_chip*2+1
+        f_corr_out(subindex) = sum(code_replicas(subindex,:).*code_replicas(t_los,:));
+    end
 
 
 
@@ -109,16 +122,16 @@ for Index = 1: epochs
     % and through the inverse channel determine the true LOS position relative to the one we assumed
 
     % first we produce the pseudo LOS, centered at the current position of the prompt correlator (corr_per_chip+1)
-    for subindex = 1: (corr_per_chip*2)+1
-        d(subindex) = sum(code_replicas(subindex,:).*code_replicas(corr_per_chip+1,:));
-    end
+        %for subindex = 1: (corr_per_chip*2)+1
+        %    d(subindex) = sum(code_replicas(subindex,:).*code_replicas(corr_per_chip+1,:));
+        %end
 
     % compute the inverse channel
     % input signal - pseudo LOS, desired signal - current correlation function (distorted)
-    [channel3] = filter_rls(corr_out, d, lambda);
+        %[channel3, P_rls] = filter_rls(corr_out, d, lambda, channel3, P_rls);
 
     % find the true LOS delay and amplitude
-    [a_los(Index), t_los(Index)] = max(channel3);
+        %[a_los(Index), t_los(Index)] = max(channel3);
 
     % at this point we know where the LOS is (from the inverse channel)
     % now we produce an artifitial LOS (perfect triangle) located in that LOS position
@@ -126,9 +139,9 @@ for Index = 1: epochs
     % but if the true LOS is to the left (early) or right (late) of the prompt correlator
     % the artifitial correlation function should have the peak shifted accordingly
     % the DLL will compare the Early Late correlator values and they will not be equal, so it will produce a correction
-    for subindex = 1: (corr_per_chip*2)+1
-        f_corr_out(subindex) = sum(code_replicas(subindex,:).*code_replicas(corr_per_chip+1+t_los(Index)-2,:));
-    end
+        %for subindex = 1: (corr_per_chip*2)+1
+        %    f_corr_out(subindex) = sum(code_replicas(subindex,:).*code_replicas(corr_per_chip+1+t_los(Index)-2,:));
+        %end
 
 
 
@@ -172,7 +185,7 @@ for Index = 1: epochs
         p3=plot(time_stamps(VE : 1 : VL,1), f_corr_out(VE : 1 : VL),'*','HandleVisibility','off','Color',"#D95319"); 
         legend
         % plot multipath information
-        p4=plot([0 0],[1 0],'-bo','HandleVisibility','off');
+        p4=plot([0 0],[0 1],'-bo','HandleVisibility','off');
         drawnow
         subplot(2,2,3);
         p5=plot((1 : 1 : Index), DLLdiscri(1,(1 : 1 : Index)),'-','HandleVisibility','off','Color',"#7E2F8E");
@@ -204,7 +217,7 @@ end
 
 
 
-function [h] = filter_rls(u, d, lambda)
+function [h, P] = filter_rls(u, d, lambda, h, P)
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Multipath is just the inverse system
@@ -215,10 +228,10 @@ function [h] = filter_rls(u, d, lambda)
         u=[0; u];
     end
     M=ceil(length(d)/2);
-    delta=0.005;
-    P = eye(M)/delta;
+    %delta=0.005;
+    %P = eye(M)/delta;
     uvec=zeros(M,1);
-    h=zeros(M,1);
+    %h=zeros(M,1);
     for i=1:N
         if i<M
             uvec(1:1:i)=d(i:-1:1);

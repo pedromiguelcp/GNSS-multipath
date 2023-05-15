@@ -22,7 +22,6 @@ do_positioning = 1;
 %% Parameter initialization 
 [file, signal, acq, track, solu, cmn] = initParameters();
 
-
 %% Acquisition 
 if ~exist(['Acquired_',file.fileName,'.mat'])
     Acquired = acquisition(file,signal,acq);
