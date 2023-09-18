@@ -136,9 +136,12 @@ Spacing_plot = zeros(1,total_corr);
 for Index = 1: total_corr
     Spacing_plot(Index) = -one_side_chip + (Index-1)/corr_per_chip_plot;
 end
+%Spacing_plot = [-1.5 -1.25 -1 -0.83 -0.66 -0.5 -0.4 -0.3 -0.2 -0.1 -0.05 0 0.05 0.1 0.2 0.3 0.4 0.5 0.66 0.83 1 1.25 1.5];
+%total_corr = size(Spacing_plot,2);
+%one_side_corr = floor(total_corr/2);
 corr_out_plot = zeros(1,total_corr);
 
-enable_RLS = 0;
+enable_RLS = 1;
 enable_RLS_plot = 0;
 save_cn0 = 0;
 numSample = round((signal.codelength*pdi)/(f0/signal.Fs));
@@ -249,31 +252,10 @@ if enable_RLS_plot
     xlabel('Epoch (ms)');
     title('DLL DISCRIMINATOR');
 end
-
-enable_freq_plot=0;
-if enable_freq_plot
-    carrfreq_variation = zeros(1,2000);
-    codefreq_variation = zeros(1,2000);
-    figure(1);
-    subplot(2,1,1);
-    carr_freq_plot=plot(zeros(1,1), zeros(1,1),'*-');
-    ylabel('Frequency (Hz)');
-    xlabel('Epoch (ms)');
-    title('Carrier Frequency variation');
-    ylim([-10 10]);
-
-    subplot(2,1,2);
-    code_freq_plot=plot(zeros(1,1), zeros(1,1),'*-');
-    ylabel('Frequency (Hz)');
-    xlabel('Epoch (ms)');
-    title('Code Frequency variation');
-    ylim([-2 2]);
-    drawnow  
-end
     
 h = waitbar(0,['Conventional Tracking, Length: ',num2str(datalength),' ms,', '  Please wait...']);
 %%
-for msIndex = 1: 2000/pdi 
+for msIndex = 1: datalength/pdi 
     waitbar(msIndex/(datalength/pdi),h)
     for svindex = 1 :svlength
         prn = sv(svindex);
@@ -319,20 +301,50 @@ for msIndex = 1: 2000/pdi
         P_q = sum(CodePrompt   .*QuadratureSignal);
         L_i	= sum(CodeLate     .*InphaseSignal);  
         L_q = sum(CodeLate     .*QuadratureSignal);
-
+        
         %%%%%%%% RLS TRACKING %%%%%%%%
-        if enable_RLS
+        if enable_RLS & (msIndex > 100)
             %%%%%%%% HIGH RESOLUTION CORRELATOR %%%%%%%%
             time_stamps_plot = zeros(total_corr,numSample);
             code_replicas_plot = zeros(total_corr,numSample);
             for subindex = 1: total_corr
                 time_stamps_plot(subindex,:) = (Spacing_plot(subindex) + remChip(svindex)) : codeFreq(svindex)/signal.Fs : ((numSample -1) * (codeFreq(svindex)/signal.Fs) + Spacing_plot(subindex) + remChip(svindex));
                 code_replicas_plot(subindex,:) = Code_plot(svindex,ceil(time_stamps_plot(subindex,:)) + 7);
-                corr_out_plot(subindex) = sum(code_replicas_plot(subindex,:).*InphaseSignal);% + sum(code_replicas_plot(subindex,:).*QuadratureSignal);
+                %corr_out_plot(subindex) = sum(code_replicas_plot(subindex,:).*InphaseSignal);% + sum(code_replicas_plot(subindex,:).*QuadratureSignal);
+                corr_inphase(subindex) = sum(code_replicas_plot(subindex,:).*InphaseSignal);
+                corr_quadrat(subindex) = sum(code_replicas_plot(subindex,:).*QuadratureSignal);
+                corr_out_plot(subindex) = sqrt(corr_inphase(subindex)^2 + corr_quadrat(subindex)^2);
             end
 
+            %%%%%%%%%%%%%%%% Least-Squares optimized %%%%%%%%%%%%%%%%
+            if msIndex == 101 % same for all sv
+                LS_G = zeros(total_corr, total_corr);
+                for subindex = 1 : total_corr
+                    for subindex1 = 1 : total_corr 
+                        LS_G(subindex1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(subindex1,:));
+                    end
+                end
+                LS_S=pinv(LS_G'*LS_G)*LS_G';
+            end
+
+            %LS_D = corr_out_plot';
+            %LS_H = abs(LS_S*LS_D);
+            %[a0, t0] = max(LS_H);
+
+            %d = abs(corr_out_plot);
+            %u = LS_G;
+            
+            %[ch_imp_resp(:,svindex), P_rls(:,:,svindex)] = filter_ls_to_rls(u, d, lambda, ch_imp_resp(:,svindex), P_rls(:,:,svindex));
+            %[ch_imp_resp1] = filter_ls_to_rls(u, d, lambda);
+            %[a0, t0] = max(ch_imp_resp1);
+
+            d = InphaseSignal(1,1:1000);
+            u = code_replicas_plot(:,1:1000)';
+            [ch_imp_resp] = filter_ls_to_rls1(u, d, 1, total_corr);
+            [a0, t0] = max(ch_imp_resp);
 
 
+            %{
             u=abs(corr_out_plot);
             for subindex = 1 : total_corr
                 d(1,subindex) = sum(code_replicas_plot(subindex,:).*code_replicas_plot(one_side_corr+1,:));
@@ -381,26 +393,35 @@ for msIndex = 1: 2000/pdi
             %L_i = new_corr(1,one_side_corr+3);
             %E_i = new_corr_out(1,one_side_corr); 
             %L_i = new_corr_out(1,one_side_corr+2);  
+            if (svindex == 6) & enable_RLS_compensation_plot
+                set(p0,'XData',time_stamps_plot(:,1),'YData',abs(corr_out_plot));
+                set(p0_0,'XData',time_stamps_plot(:,1),'YData',d);
+                set(p1,'XData',(0:1/corr_per_chip_plot:(1/corr_per_chip_plot)*(t0-1)),'YData',ch_imp_resp0);
+                set(p2,'XData',time_stamps_plot(:,1),'YData',corr0(1:1:total_corr));
+                set(p3,'XData',(0:1/corr_per_chip_plot:(1/corr_per_chip_plot)*(t0-1)),'YData',ch_imp_resp1);
+                set(p4,'XData',time_stamps_plot(:,1),'YData',x_corr_out);
+                set(p5,'XData',time_stamps_plot(:,1),'YData',new_corr);
+                set(p6,'XData',(1:1:40),'YData',rmse);
+                set(p7,'XData',time_stamps_plot(:,1),'YData',new_corr1);
+                pause(0.01);
+            end
+            %}
         end
-        if (svindex == 6) & enable_RLS_compensation_plot
-            set(p0,'XData',time_stamps_plot(:,1),'YData',abs(corr_out_plot));
-            set(p0_0,'XData',time_stamps_plot(:,1),'YData',d);
-            set(p1,'XData',(0:1/corr_per_chip_plot:(1/corr_per_chip_plot)*(t0-1)),'YData',ch_imp_resp0);
-            set(p2,'XData',time_stamps_plot(:,1),'YData',corr0(1:1:total_corr));
-            set(p3,'XData',(0:1/corr_per_chip_plot:(1/corr_per_chip_plot)*(t0-1)),'YData',ch_imp_resp1);
-            set(p4,'XData',time_stamps_plot(:,1),'YData',x_corr_out);
-            set(p5,'XData',time_stamps_plot(:,1),'YData',new_corr);
-            set(p6,'XData',(1:1:40),'YData',rmse);
-            set(p7,'XData',time_stamps_plot(:,1),'YData',new_corr1);
-            pause(0.01);
-        end
+        
 
         remChip(svindex) = t_CodePrompt(numSample) + codeFreq(svindex)/signal.Fs - signal.codelength*pdi;
         % Implement code loop filter and generate NCO command
-        E = sqrt(E_i^2+E_q^2);
-        L = sqrt(L_i^2+L_q^2);
-        codeError(svindex) = 0.5*(E-L)/(E+L);  % DLL discriminator
+        %E = sqrt(E_i^2+E_q^2);
+        %L = sqrt(L_i^2+L_q^2);
+        %codeError(svindex) = 0.5*(E-L)/(E+L);  % DLL discriminator
         %codeError(svindex)       = 0.5*(t_CodePrompt(1) - time_stamps_plot(corr_per_chip_plot+1+t_los-2));
+        if (msIndex > 100) & enable_RLS
+            codeError(svindex) = 0.1*(Spacing_plot(one_side_corr+1)-Spacing_plot(t0));  % DLL discriminator
+        else
+            E = sqrt(E_i^2+E_q^2);
+            L = sqrt(L_i^2+L_q^2);
+            codeError(svindex) = 0.5*(E-L)/(E+L);  % DLL discriminator  
+        end
 
 
         codeNco(svindex) = code_outputLast(svindex) + (tau2code/tau1code)*(codeError(svindex)...
@@ -475,20 +496,7 @@ for msIndex = 1: 2000/pdi
             set(pdllDiscr,'XData',(1:1:msIndex),'YData',TckResultCT(prn).codeError(1:1:msIndex));
 
             pause(0.01);
-        end
-
-        
-        % update freq variation plots
-        if (enable_freq_plot & (svindex == 1) & (msIndex > 1) )
-            carrfreq_variation(1,msIndex) = TckResultCT(prn).carrFreq(msIndex)-TckResultCT(prn).carrFreq(msIndex-1);
-            codefreq_variation(1,msIndex) = TckResultCT(prn).codeFreq(msIndex)-TckResultCT(prn).codeFreq(msIndex-1);
-            if enable_freq_plot
-                set(carr_freq_plot,'XData',(1:1:msIndex),'YData',carrfreq_variation(1,1:1:msIndex));
-                set(code_freq_plot,'XData',(1:1:msIndex),'YData',codefreq_variation(1,1:1:msIndex)); 
-            end
-            pause(0.01);
-        end
-        
+        end        
     end % end for svindex in Tracking
     
 	%% Interpolate
@@ -698,6 +706,88 @@ function [h] = filter_rls(u, d, lambda, M)
         e=u(i)-h'*uvec;
         h=h+kappa*conj(e);
         P = lambda^(-1)*P-lambda^(-1)*kappa*uvec'*P;
+    end
+end
+
+function [h] = filter_ls_to_rls(u, d, lambda)
+  
+    N=length(u);%number of correlators
+    delta=0.005;
+    
+    P = eye(N)/delta;
+    h=zeros(N,1);
+
+    for i=1:N
+        uvec=u(i,:)';
+        kappa = (lambda^(-1)*P*uvec)/(1+lambda^(-1)*uvec'*P*uvec);
+        e=d(i)-h'*uvec;
+        h=h+kappa*conj(e);
+        P = lambda^(-1)*P-lambda^(-1)*kappa*uvec'*P;
+    end
+end
+
+function [h] = filter_ls_to_rls1(u, d, lambda, M)
+    N=length(u);%number of correlators
+    delta=0.005;
+    
+    P = eye(M)/delta;
+    h=zeros(M,1);
+
+    for i=1:N
+        uvec=u(i,:)';
+        kappa = (lambda^(-1)*P*uvec)/(1+lambda^(-1)*uvec'*P*uvec);
+        e=d(i)-h'*uvec;
+        h=h+kappa*conj(e);
+        P = lambda^(-1)*P-lambda^(-1)*kappa*uvec'*P;
+    end
+end
+
+function [h] = filter_ls_to_rls2(u, d, lambda, lambda1,M)
+    corr_func = figure(1);
+    p0_0=subplot(2,1,1);
+    
+    p0=plot(zeros(1,1),zeros(1,1),'-*','DisplayName','lambda=1');
+    title('Lambda = 1');
+    legend
+    ha=gca;
+    p1_0=subplot(2,1,2);
+    title('Lambda = 0.85');
+    p1=plot(zeros(1,1),zeros(1,1),'-*','DisplayName','lambda=0.85');
+    title('Lambda = 0.85');
+    N=length(u);%number of correlators
+    delta=0.005;
+    
+    P = eye(M)/delta;
+    P1 = eye(M)/delta;
+    h=zeros(M,1);
+    h1=zeros(M,1);
+
+    for i=1:N
+        uvec=u(i,:)';
+        kappa = (lambda^(-1)*P*uvec)/(1+lambda^(-1)*uvec'*P*uvec);
+        e=d(i)-h'*uvec;
+        h=h+kappa*conj(e);
+        P = lambda^(-1)*P-lambda^(-1)*kappa*uvec'*P;
+
+        kappa1 = (lambda1^(-1)*P1*uvec)/(1+lambda1^(-1)*uvec'*P1*uvec);
+        e1=d(i)-h1'*uvec;
+        h1=h1+kappa1*conj(e1);
+        P1 = lambda1^(-1)*P1-lambda1^(-1)*kappa1*uvec'*P1;
+
+
+        
+        
+        subplot(p0_0);
+        cla
+        stem((-1:2/(M-1):1),h,'filled');
+        axis padded
+        subplot(p1_0);
+        cla
+        stem((-1:2/(M-1):1),h1,'filled');
+        axis padded
+        title( ha, sprintf( 't=%.1f', i ) );
+
+        pause(0.025);
     end
 end
 

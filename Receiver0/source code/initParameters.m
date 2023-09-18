@@ -53,7 +53,7 @@ track.PLLBW              	= 20;
 track.PLLDamp             	= 0.707;
 track.PLLGain              	= 0.25; 	
 track.msEph                 = 40000; % at least 30 seconds 
-track.msToProcessCT       	= 5000; % unit: ms
+track.msToProcessCT       	= 10000; % unit: ms
 track.msToProcessVT         = 5000; %
 track.pdi                   = 1;
 
