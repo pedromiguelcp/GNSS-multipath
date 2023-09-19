@@ -116,8 +116,10 @@ n_part = 100;%Number of particles
 n_iter = 10;
 Rww_fil = 0 ; %Process noise
 Rvv_fil = 0.01; %Measurement noise
-
-
+M_pf = 1; % number of paths
+Mea_pf = zeros(total_corr,epochs);
+x_est_bpf = zeros(epochs,2*M_pf);
+C_s = zeros(epochs,1);
 
 
 LOS_delay=0;
@@ -236,25 +238,45 @@ for Index = 1: epochs
         elseif enable_PF
             % Initialization
             if (Index == 1)
-                particle = -0.5 + rand(n_part, 1);
-                particle_pred = zeros(n_part,1);
+                particle = -0.5 + rand(n_part, 2*M_pf);
+                particle_pred = zeros(n_part, 2*M_pf);
                 weight = ones(n_part,1)/n_part;
-                x_est_bpf = zeros(n_iter,1);
     	        x_est_bpf(1) = mean(particle);
             end
+            Mea_pf(:,Index)=corr_out';
+            for idx=1:n_part
 
-            % Importance Sampling
+                % Importance Sampling
+                % Generate path delays according to the Importance Density Function
+                particle(idx,1) = particle_pred(idx,1) + sqrt(Rww_fil)*randn;
 
-
-            % Weight update
-
-
+                % Estimate amplitudes according to path delays
+                
+                
+                % Weight update
+                % transform the particle_pred into the measurements domain
+                % the measurements domain is the correlation output
+                innov = Mea_pf(:,Index) - ;
+                weight(idx) = exp( -log(sqrt(2*pi*Rvv_fil)) -(( innov )^2)/(2*Rvv_fil) );
+            end
+            % Weigth normalization
+            weight = weight/sum(weight);
+                
             % Estimation
-
-
+            % Maximum a Posteriori (MAP) estimation
+            x_est_bpf(Index) = mean(particle);
+            
+            % Update the covariance of the state error estimation
+            for idx=1:n_part
+                C_s(Index) = C_s(Index) + weight(idx)*((-x_est_bpf(Index))*(-x_est_bpf(Index)));
+            end
+            
             % Resampling
-
-
+            % Initialize next iteration
+            % Every particle equal to MAP
+            for idx=1:n_part
+                particle_pred(idx) = x_est_bpf(Index);
+            end
 
         % EKF    
         elseif enable_EKF 
