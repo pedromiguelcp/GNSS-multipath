@@ -16,10 +16,10 @@ function [file, signal, acq, track, solu, cmn] = initParameters()
 % Written by B. XU and L. T. HSU
 
 %% File parameters
-file.fileName       = 'Scenario_1'; 
-file.fileRoute      = ['C:\Users\Pedro\OneDrive\PhD\',file.fileName,'.dat']; 
-file.skip        	= 100; % in unit of ms
-solu.iniPos	= [41.451398/180 * pi, -8.291137/180 * pi, 50]; % Ground truth location
+file.fileName       = 'USRPN310_Scenario1_25M_I8Q8_100s'; 
+file.fileRoute      = ['C:\Users\Pedro\Documents\phd\data\',file.fileName,'.dat']; 
+file.skip        	= 0; % in unit of ms
+solu.iniPos	= [41.451401319624345/180 * pi, -8.29113842707692/180 * pi, 50]; % Ground truth location
 global ALPHA BETA 
 ALPHA = [8.3819E-09  1.4901E-08 -5.9605E-08 -5.9605E-08];%       IONOSPHERIC CORR
 BETA  = [8.3968E+04  1.6384E+04 -1.3107E+05 -6.5536E+04];%       IONOSPHERIC CORR
@@ -28,9 +28,9 @@ cmn.doy = 262; % Day of year
 
 %% File parameters
 file.fid           	= fopen(file.fileRoute,'r','ieee-le');
-file.skiptimeVT     = 2000; % skip time from the first measurement epoch of CT, in uint of msec
-file.dataType       = 1;    %1:I; 2:IQ
-file.dataPrecision  = 2;    %1:int8 or byte; 2; int16 
+file.skiptimeVT     = 0; % skip time from the first measurement epoch of CT, in uint of msec
+file.dataType       = 2;    %1:I; 2:IQ
+file.dataPrecision  = 1;    %1:int8 or byte; 2; int16 
 
 %% Signal parameters
 signal.IF               = 0;%1580e6-1575.42e6; % unit: Hz 
@@ -57,7 +57,7 @@ track.DLLGain            	= 0.1;
 track.PLLBW              	= 15;
 track.PLLDamp             	= 0.707;
 track.PLLGain              	= 0.25; 	
-track.msToProcessCT       	= 45000; % unit: ms 40000
+track.msToProcessCT       	= 80000; % unit: ms 40000
 track.msPosCT               = 10000; % unit: ms
 track.msToProcessVT         = 2000; %track.msPosCT - file.skiptimeVT; %
 track.pdi                   = 1; %

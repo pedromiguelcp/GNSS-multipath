@@ -107,17 +107,14 @@ S_k=zeros(P_ekf,P_ekf); % residual covariance matrix
 R_k=zeros(P_ekf,P_ekf); % measurement noise covariance matrix
 E_k=zeros(P_ekf,1); % residual between measurement and predicted measurements
 IDENT=eye(L_ekf+2); % identity matrix
-B=eye(L_ekf+2)*0.0001; % process noise covariance
-B(1,1)=0.1;
+B=eye(L_ekf+2)*0.0001; % process noise covariance matrix
+B(1,1)=0.000001;
 drv_fi_ss=zeros(P_ekf,L_ekf+1);
-drv_fi_ss1=zeros(P_ekf,L_ekf+1);
-drv_fi_ss2=zeros(P_ekf,L_ekf+1);
-
 
 LOS_delay=0;
 dynamic_LOS=0; % time-varying LOS
 dynamic_multipath=1; % time-varying multipath
-en_plots=1;
+en_plots=1; % enable plots
 
 for Index = 1: epochs
     
@@ -126,20 +123,23 @@ for Index = 1: epochs
         mltpth_delays=chan4.delays;
         mltpth_attenuation=chan4.attenuation;
     elseif dynamic_multipath
-        if Index<60
+        if Index<100
             %LOS_delay=0.1;
             mltpth_delays=chan3.delays;
             mltpth_attenuation=chan3.attenuation;
         elseif Index<150
             mltpth_delays=chan2.delays;
             mltpth_attenuation=chan2.attenuation;
+        elseif Index<250
+            mltpth_delays=chan1.delays;
+            mltpth_attenuation=chan1.attenuation;
         end
     end
     
     %%%% varying LOS %%%%
     if dynamic_LOS
         if Index<200
-            LOS_delay=LOS_delay-0.001; % simulate positive doppler
+            LOS_delay=LOS_delay+0.001; % simulate positive doppler
         else
             LOS_delay=LOS_delay-0.000; % simulate negative doppler
         end
@@ -148,7 +148,7 @@ for Index = 1: epochs
 
     %numSample = round((codelength-remChip)/(codeFreq/fs)); 
     
-    LOS_Code = Spacing(P)+LOS_delay : codeFreqBasis/fs : ((numSample -1) * (codeFreqBasis/fs) + Spacing(P)+LOS_delay);
+    LOS_Code = Spacing(P)+LOS_delay : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P)+LOS_delay);
     INCode   = Code(ceil(LOS_Code) + 2);
 
     %interference injection
@@ -160,16 +160,9 @@ for Index = 1: epochs
     %correlator engine
     for subindex = 1: total_corr
         time_stamps(subindex,:) = (Spacing(subindex) + remChip) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(subindex) + remChip);
-    end
-
-    for subindex = 1: total_corr
         code_replicas(subindex,:) = Code(ceil(time_stamps(subindex,:)) + 2);
-    end
-    
-    for subindex = 1: total_corr
         corr_out(subindex) = sum(code_replicas(subindex,:)     .*INCode);
     end
-    %corr_out=corr_out+std(corr_out)*randn(1,21)/10;
 
     remChip   = (time_stamps(P,numSample) + codeFreq/fs) - codeFreqBasis*0.001;
 
@@ -228,105 +221,53 @@ for Index = 1: epochs
 
         % EKF    
         elseif enable_EKF 
+            % Initialization
             if (Index == 1)
-                X_k=zeros(L_ekf+2,1);
-                X_k(2,1)=1;
-                fi_ss=LS_G(:,L_ekf+1:P_ekf);
-                F_k(:,2:L_ekf+2)=fi_ss;
+                X_k = zeros(L_ekf+2,1);
+                X_k(2,1) = 1; % only LOS
+                fi_ss = LS_G(:,L_ekf+1:P_ekf);
+                F_k(:,2:L_ekf+2) = fi_ss; % equation 46
 
-                drv_x=0:(1/L_ekf):(2);
-                for drv_idx=1:L_ekf+1
-                    drv_fi_ss1(1:P_ekf-1,drv_idx)=diff(fi_ss(:,drv_idx)')./diff(drv_x);
-                end
-               
-                drv_fi_ss1(P_ekf,:)=drv_fi_ss1(P_ekf-1,:);
-                drv_fi_ss1(P_ekf,L_ekf+1)=drv_fi_ss1(P_ekf,L_ekf);
-
-                drv_fi_ss1(L_ekf+1,1)=0;
-                drv_fi_ss1(L_ekf+2,2)=0;
-                drv_fi_ss1(L_ekf+3,3)=0;
-                drv_fi_ss1(L_ekf+4,4)=0;
-                drv_fi_ss1(L_ekf+5,5)=0;
-                drv_fi_ss1(L_ekf+6,6)=0;
-                drv_fi_ss1(L_ekf+7,7)=0;
-                drv_fi_ss1(L_ekf+8,8)=0;
-                drv_fi_ss1(L_ekf+9,9)=0;
-                drv_fi_ss1(L_ekf+10,10)=0;
-                drv_fi_ss1(L_ekf+11,11)=0;
-                for drv_idx=1:L_ekf+1
-                    aux=drv_fi_ss1(drv_idx,:);
-                    drv_fi_ss1(drv_idx,:)=drv_fi_ss1(P_ekf-drv_idx+1,:);
-                    drv_fi_ss1(P_ekf-drv_idx+1,:)=aux;
-                end
-
-                drv_x=0:(1/L_ekf):(1);
-                for drv_idx=1:P_ekf
-                    drv_fi_ss(drv_idx,1:L_ekf)=diff(fi_ss(drv_idx,:))./diff(drv_x);
-                end
-                drv_fi_ss(:,L_ekf+1)=drv_fi_ss(:,L_ekf);
-                drv_fi_ss(L_ekf+1,L_ekf+1)=drv_fi_ss(L_ekf,L_ekf+1);
-                %drv_fi_ss(L_ekf+1,1)=0;
-                %drv_fi_ss(L_ekf+2,2)=0;
-                %drv_fi_ss(L_ekf+3,3)=0;
-                %drv_fi_ss(L_ekf+4,4)=0;
-                %drv_fi_ss(L_ekf+5,5)=0;
-                %drv_fi_ss(L_ekf+6,6)=0;
-                %drv_fi_ss(L_ekf+7,7)=0;
-                %drv_fi_ss(L_ekf+8,8)=0;
-                %drv_fi_ss(L_ekf+9,9)=0;
-                %drv_fi_ss(L_ekf+10,10)=0;
-                %drv_fi_ss(L_ekf+11,11)=0;
-                %for drv_idx=1:P_ekf
-                %    for drv_idx1=1:L_ekf+1
-                %        if abs(drv_fi_ss(drv_idx,drv_idx1))<500
-                %            drv_fi_ss(drv_idx,drv_idx1)=-26000;
-                %        end
-                %        if drv_fi_ss(drv_idx,drv_idx1)<0
-                %            drv_fi_ss(drv_idx,drv_idx1)=-26000;
-                %        end
-                %        if drv_fi_ss(drv_idx,drv_idx1)>0
-                %            drv_fi_ss(drv_idx,drv_idx1)=26000;
-                %        end
-                %    end
-                %end
-                drv_fi_ss2(:,1)=(LS_G(:,L_ekf+1)-LS_G(:,L_ekf))./(1/L_ekf);
-                for drv_idx=2:L_ekf+1
-                    drv_fi_ss2(:,drv_idx)=(fi_ss(:,drv_idx)-fi_ss(:,1))./((drv_idx-1)*(1/L_ekf));
+                %drv_fi_ss(:,1)=(LS_G(:,L_ekf+1)-LS_G(:,L_ekf))/(1/L_ekf);
+                drv_fi_ss2(:,1)=zeros(P_ekf,1);
+                for drv_idx=2:L_ekf+1 % this should be wrong!!!!
+                    drv_fi_ss(:,drv_idx)=(fi_ss(:,drv_idx)-LS_G(:,L_ekf))./((drv_idx-1)*(1/L_ekf));
                 end
             end
             % prediction
-            X_k=A*X_k;
-            P_k=A*P_k*A'+B;
+            X_k = A*X_k; % equation 33
+            P_k = A*P_k*A'+B; % equation 34
 
             % update
             Z_k = corr_out';
-            Z_K_predict = X_k(2:L_ekf+2,1)'*fi_ss';
-            E_k = Z_k - Z_K_predict;
+            Z_K_predict = X_k(2:L_ekf+2,1)'*fi_ss'; % equation 39
+            E_k = Z_k - Z_K_predict; % equation 36
 
-            F_k(:,1) = (X_k(2:L_ekf+2,1)'*drv_fi_ss2')';
-
-            S_k = F_k*P_k*F_k'+ LS_G;%
-            K_k = P_k*F_k'*pinv(S_k);
-            X_k = X_k+K_k*E_k';
-            P_k = (IDENT-K_k*F_k)*P_k;
-            t_los=X_k(1,1);
+            F_k(:,1) = (X_k(2:L_ekf+2,1)'*drv_fi_ss')'; % equation 45
+            
+            h_r = 0;
+            for idx=1:L_ekf
+                h_r = h_r + X_k(idx+2)*X_k(idx+2);
+            end
+            S_k = F_k*P_k*F_k' + LS_G.*(1+h_r); % equation 43
+            K_k = P_k*F_k'*pinv(S_k); % equation 42
+            X_k = X_k+K_k*E_k'; % equation 40
+            P_k = (IDENT-K_k*F_k)*P_k; % equation 41
+            t_los = X_k(1,1);
         end
-
-
 
         C_sv(:,:,svindex)=weights; % update weights
     end
-
-
-
-
 
     % DLL discriminator and loop filter
     if new_tracking
         if enable_EKF
             DLLdiscri(1,Index) = -t_los;
-            code_output= (0.3749245/0.007030542258775)*2.5*DLLdiscri(1,Index);
+        else
+            DLLdiscri(1,Index) = Spacing(P) - Spacing(t_los);
         end
+        code_output = (0.3749245/0.007030542258775)*2.5*DLLdiscri(1,Index);
+        code_output = 0;
     else
         DLL_E           = sqrt(corr_out(E)^2);
         DLL_L           = sqrt(corr_out(L)^2);
