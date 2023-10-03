@@ -1,7 +1,6 @@
 clear all;
 close all;
 clc;
-
 % Define the parameters for the simulation
 c = 299792458; % m/s
 fs = 26000000; % Sample rate (Hz)
@@ -38,8 +37,8 @@ chan3.attenuation=[2 4 8];
 % Channel 4
 chan4.delays=[];
 chan4.attenuation=[];
-chan4_1.delays=[0.2];
-chan4_1.attenuation=[2];
+chan4_1.delays=[0.2 0.4];
+chan4_1.attenuation=[2 3];
 
 
 epochs = 5000; %signal tracking epochs
@@ -57,9 +56,9 @@ svindex=1;
 enable_LS = 0;
 enable_LMS = 0;
 enable_NLMS = 0;
-enable_EKF = 0;
-enable_PF = 1;
-if enable_LS || enable_LMS || enable_NLMS || enable_EKF || enable_PF
+enable_PF = 0;
+enable_RBPF = 1;
+if enable_LS || enable_LMS || enable_NLMS || enable_EKF || enable_PF || enable_RBPF
     new_tracking = 1;
 else
     new_tracking = 0;
@@ -95,27 +94,8 @@ corr_matrix = zeros(total_corr,total_corr);
 nlms_lr=.001;
 gamma = 1e-12; % small positive constant to avoid singularity
 NLMS_iterations=1;
-%% EKF %%
-L_ekf=corr_per_chip;
-P_ekf=2*L_ekf+1; % total correlators
-X_k=zeros(L_ekf+2,1); % state vector
-Z_k=zeros(P_ekf,1); % measurements
-Z_K_predict=zeros(P_ekf,1); % predicted measurements
-tau_k=0; % tau LOS estimate
-h_k=zeros(L_ekf+1,1); % channel estimate
-A=eye(L_ekf+2); % state transition matrix
-P_k=eye(L_ekf+2); % state estimate covariance
-K_k=zeros(L_ekf+2,P_ekf); % kalman gain
-F_k=zeros(P_ekf,L_ekf+2); % linearization matrix
-S_k=zeros(P_ekf,P_ekf); % residual covariance matrix
-R_k=zeros(P_ekf,P_ekf); % measurement noise covariance matrix
-E_k=zeros(P_ekf,1); % residual between measurement and predicted measurements
-IDENT=eye(L_ekf+2); % identity matrix
-B=eye(L_ekf+2)*0.0001; % process noise covariance
-B(1,1)=0.1;
-drv_fi_ss=zeros(P_ekf,L_ekf+1);
 %% PF %%
-n_part = 250;%Number of particles
+n_part = 100;%Number of particles
 n_iter = 10;
 Rww_fil = 0 ; %Process noise
 Rvv_fil = 2500*((total_corr-1)/20)*(n_part/250); %Measurement noise (21 corr - 2500, 41 corr - 5000, ...)
@@ -127,22 +107,20 @@ corr_outPF = zeros(1,total_corr)';
 
 LOS_delay=0;
 dynamic_LOS=0; % time-varying LOS
-dynamic_multipath=1; % time-varying multipath
+dynamic_multipath=0; % time-varying multipath
 en_plots=1;
-
-rng(10);
 
 for Index = 1: epochs
     
     %%%% varying multipath %%%%
-    if Index < 15
+    if Index < 30
         mltpth_delays=chan4.delays;
         mltpth_attenuation=chan4.attenuation;
     elseif dynamic_multipath
         if Index<40
             LOS_delay=0.1;
-            %mltpth_delays=chan4.delays;
-            %mltpth_attenuation=chan4.attenuation;
+            %mltpth_delays=chan4_1.delays;
+            %mltpth_attenuation=chan4_1.attenuation;
         elseif Index<50
             LOS_delay=0.2;
             %mltpth_delays=chan4.delays;
@@ -208,7 +186,7 @@ for Index = 1: epochs
         y_unfiltered = corr_out';
         weights=C_sv(:,:,svindex);
 
-        if enable_LMS || enable_NLMS
+        if enable_LMS | enable_NLMS
             %%%%%%%%% LOS SIGNAL ESTIMATION %%%%%%%%%
             for subindex = 1 : total_corr
                 for subindex1 = 1 : total_corr 
@@ -243,7 +221,132 @@ for Index = 1: epochs
             for i=1:NLMS_iterations
                 error=(desired'-y_unfiltered*weights);
                 weights = weights + (nlms_lr/(gamma+(abs(y_unfiltered)*abs(y_unfiltered)')))*y_unfiltered'*error;
-            end  
+            end 
+            
+        % RBPF    
+        elseif enable_RBPF
+            % Initialization
+            if (Index == 1)
+                particle_pred = zeros(n_part, 2*M_pf);
+                particle = zeros(n_part, 2*M_pf);
+                particle(:,1) = -0.5 + rand(n_part, 1); % LOS ambiguity
+                for idx=1:M_pf-1
+                    particle(:,2*idx+1) = particle(:,1) + rand(n_part, 1); % Multipath ambiguity
+                end
+                weight = ones(n_part,1)/n_part;
+            end
+            % run newton-raphson algorithm
+
+            % form the gaussian importance density given the previous likelihood approx.
+
+            for idx=1:n_part
+                % kalman prediction
+                xp = F_k*x;
+                Pp = F_k*P*F_k' + Q;
+
+
+
+
+
+                % Importance Sampling
+                % Generate path delays according to the Importance Density Function
+                if Index>1
+                    %particle(idx,1) = particle_pred(idx,1) + randn(1,1)*sqrt(C_s(Index-1, 1));
+                    pd = makedist('Normal','mu',particle_pred(idx,1),'sigma',sqrt(C_s(Index-1, 1)));
+                    t = truncate(pd,-0.5,0.5);
+                    particle(idx,1) = random(t,1,1);
+                    for subindex=1:M_pf-1
+                        pd = makedist('Normal','mu',particle_pred(idx,2*subindex+1),'sigma',sqrt(C_s(Index-1,subindex+1)));
+                        t = truncate(pd,particle(idx,1),particle(idx,1)+1);%random(t,1,1)
+                        particle(idx,2*subindex+1) = random(t,1,1);
+                        %particle(idx,2*subindex+1) = particle(idx,1) + abs((particle(idx,2*subindex+1)-particle(idx,1)) + random(t,1,1));%randn(1,1)*sqrt(C_s(Index-1,subindex+1)));
+                    end
+                end
+
+
+                % Estimate amplitudes according to path delays
+                LS_H = LS_S*corr_out;
+                for subindex=0:M_pf-1
+                    particle(idx,2*subindex+2)=interp1(Spacing,LS_H,particle(idx,2*subindex+1));
+                    if(isnan(particle(idx,2*subindex+2)))
+                        particle(idx,2*subindex+2)=0;
+                    end
+                end
+
+
+                dt = 0.2;
+                t  = 0:dt:100;
+                Nsamples = length(t);
+                Xsaved = zeros(Nsamples, 1);
+                Zsaved = zeros(Nsamples, 1);
+                for k=1:Nsamples
+                    z = GetVolt();  
+                    volt = SimpleKalman(z);
+                    
+                    Xsaved(k) = volt;
+                    Zsaved(k) = z;
+                end
+                figure
+                plot(t, Xsaved, 'o-')
+                hold on
+                plot(t, Zsaved, 'r:*') 
+
+
+                
+                % Weight update
+                % transform the particle into the measurements domain - correlation output
+                INCodePF=0;
+                for subindex=0:M_pf-1
+                    if particle(idx,2*subindex+2) ~= 0
+                        CodePF = Spacing(P) + particle(idx,2*subindex+1) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + particle(idx,2*subindex+1));
+                        INCodePF = INCodePF + Code(ceil(CodePF) + 4).*particle(idx,2*subindex+2);
+                    end
+                end
+
+                for subindex = 1: total_corr
+                    time_stampsPF = (Spacing(subindex)) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(subindex));
+                    code_replicasPF = Code(ceil(time_stampsPF) + 4);
+                    corr_outPF(subindex) = sum(code_replicasPF.*INCodePF);
+                end
+                innov = norm(corr_out - corr_outPF);
+                %weight(idx) = exp( -log(sqrt(2*pi*Rvv_fil)) -(( innov/10000 )^2)/(2*Rvv_fil) );
+                weight(idx) = exp( -0.5 * ((innov / Rvv_fil)^2) );
+            end
+            % Weigth normalization
+            weight = weight/sum(weight);
+                
+            % Estimation
+            % Maximum a Posteriori (MAP) estimation
+            [~, MAP] = max(weight);
+            x_est_bpf(Index,:) = particle(MAP,:);
+            
+            % Update the covariance of the state error estimation
+            for idx=1:n_part
+                for subindex=0:M_pf-1
+                    C_s(Index,subindex+1) = C_s(Index,subindex+1) + weight(idx)*((particle(idx,subindex*2+1:subindex*2+2)-x_est_bpf(Index,subindex*2+1:subindex*2+2))*(particle(idx,subindex*2+1:subindex*2+2)-x_est_bpf(Index,subindex*2+1:subindex*2+2))');
+                end
+            end
+            
+            % Resampling
+            % effective sample size to indicate degeneracy
+            N_eff = 1/( sum(weight.^2) );
+            if N_eff < (2/3)*n_part
+                %Resampling
+                cdf = cumsum(weight);
+                %Systematic resampling
+                sam = rand/n_part;
+                for i=1:n_part
+                    samInd = sam + (i-1)/n_part;
+                    ind = find( samInd<=cdf ,1);
+                    particle_pred(i) = particle(ind);
+                end
+            else
+                for idx=1:n_part
+                    particle_pred(idx,:) = particle(Index,:);
+                end
+            end
+            
+
 
         % PF    
         elseif enable_PF
@@ -287,8 +390,10 @@ for Index = 1: epochs
                 % transform the particle into the measurements domain - correlation output
                 INCodePF=0;
                 for subindex=0:M_pf-1
-                    CodePF = Spacing(P) + particle(idx,2*subindex+1) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + particle(idx,2*subindex+1));
-                    INCodePF = INCodePF + Code(ceil(CodePF) + 4).*particle(idx,2*subindex+2);
+                    if particle(idx,2*subindex+2) ~= 0
+                        CodePF = Spacing(P) + particle(idx,2*subindex+1) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + particle(idx,2*subindex+1));
+                        INCodePF = INCodePF + Code(ceil(CodePF) + 4).*particle(idx,2*subindex+2);
+                    end
                 end
 
                 for subindex = 1: total_corr
@@ -321,62 +426,6 @@ for Index = 1: epochs
             for idx=1:n_part
                 particle_pred(idx,:) = x_est_bpf(Index,:);
             end
-
-        % EKF    
-        elseif enable_EKF 
-            if (Index == 1)
-                X_k=zeros(L_ekf+2,1);
-                X_k(2,1)=1;
-                fi_ss=LS_G(:,L_ekf+1:P_ekf);
-                F_k(:,2:L_ekf+2)=fi_ss;
-                %drv_x=0:(0.1*0.001/1023):(0.001/1023);
-                drv_x=0:(1/L_ekf):(1);
-                for drv_idx=1:P_ekf
-                    drv_fi_ss(drv_idx,1:L_ekf)=diff(fi_ss(drv_idx,:))./diff(drv_x);
-                end
-                drv_fi_ss(:,L_ekf+1)=drv_fi_ss(:,L_ekf);
-                drv_fi_ss(L_ekf+1,L_ekf+1)=drv_fi_ss(L_ekf,L_ekf+1);
-                drv_fi_ss(L_ekf+1,1)=0;
-                drv_fi_ss(L_ekf+2,2)=0;
-                drv_fi_ss(L_ekf+3,3)=0;
-                drv_fi_ss(L_ekf+4,4)=0;
-                drv_fi_ss(L_ekf+5,5)=0;
-                drv_fi_ss(L_ekf+6,6)=0;
-                drv_fi_ss(L_ekf+7,7)=0;
-                drv_fi_ss(L_ekf+8,8)=0;
-                drv_fi_ss(L_ekf+9,9)=0;
-                drv_fi_ss(L_ekf+10,10)=0;
-                drv_fi_ss(L_ekf+11,11)=0;
-                for drv_idx=1:P_ekf
-                    for drv_idx1=1:L_ekf+1
-                        if abs(drv_fi_ss(drv_idx,drv_idx1))<500
-                            drv_fi_ss(drv_idx,drv_idx1)=-26000;
-                        end
-                        if drv_fi_ss(drv_idx,drv_idx1)<0
-                            drv_fi_ss(drv_idx,drv_idx1)=-26000;
-                        end
-                        if drv_fi_ss(drv_idx,drv_idx1)>0
-                            drv_fi_ss(drv_idx,drv_idx1)=26000;
-                        end
-                    end
-                end
-            end
-            % prediction
-            X_k=A*X_k;
-            P_k=A*P_k*A'+B;
-
-            % update
-            Z_k = corr_out';
-            Z_K_predict = X_k(2:L_ekf+2,1)'*fi_ss';
-            E_k = Z_k - Z_K_predict;
-
-            F_k(:,1) = (X_k(2:L_ekf+2,1)'*drv_fi_ss')';
-
-            S_k = F_k*P_k*F_k' + LS_G;
-            K_k = P_k*F_k'*pinv(S_k);
-            X_k = X_k+K_k*E_k';
-            P_k = (IDENT-K_k*F_k)*P_k;
-            t_los=X_k(1,1);
         end
 
 
@@ -429,7 +478,7 @@ for Index = 1: epochs
             subplot(221);
             xlabel('Delay in chips')
             ylabel('Amplitude')
-            title('Channel Impulse Response (CIR)')
+            title(['Channel Impulse Response (CIR)'])
             ylim([-0.1 1.2])
             xlim([-0.1 1])
             drawnow
@@ -459,7 +508,7 @@ for Index = 1: epochs
             subplot(221)
             hold on
             cla
-            title('Channel Impulse Response (CIR)');
+            title(['Channel Impulse Response (CIR)']);
             stem(LOS_delay,1,'b');
             stem(mltpth_delays+LOS_delay,1./mltpth_attenuation,'r');
             hold on
@@ -478,6 +527,44 @@ for Index = 1: epochs
     end
 end
 
+function volt = SimpleKalman(z)
+    persistent A H Q R 
+    persistent x P
+    persistent firstRun
+
+
+    if isempty(firstRun)
+        A = 1;
+        H = 1;
+        
+        Q = 0;
+        R = 4;
+
+        x = 14;
+        P =  6;
+        
+        firstRun = 1;  
+    end
+
+        
+    xp = A*x;
+    Pp = A*P*A' + Q;
+
+    K = Pp*H'*inv(H*Pp*H' + R);
+
+    x = xp + K*(z - H*xp);
+    P = Pp - K*H*Pp;
+
+
+    volt = x;
+end
+
+function z = GetVolt()
+    %
+    %
+    w = 0 + 4*randn(1,1);
+    z = 14.4 + w;
+end
 %{
 
 %}

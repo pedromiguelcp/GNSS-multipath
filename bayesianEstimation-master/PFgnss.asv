@@ -115,11 +115,11 @@ B=eye(L_ekf+2)*0.0001; % process noise covariance
 B(1,1)=0.1;
 drv_fi_ss=zeros(P_ekf,L_ekf+1);
 %% PF %%
-n_part = 250;%Number of particles
+n_part = 500;%Number of particles
 n_iter = 10;
 Rww_fil = 0 ; %Process noise
-Rvv_fil = 2500*((total_corr-1)/20)*(n_part/250); %Measurement noise (21 corr - 2500, 41 corr - 5000, ...)
-M_pf = 1; % number of paths
+Rvv_fil = 2500; %Measurement noise
+M_pf = 3; % number of paths
 x_est_bpf = zeros(epochs,2*M_pf);
 C_s = zeros(epochs,M_pf);
 corr_outPF = zeros(1,total_corr)';
@@ -136,11 +136,15 @@ for Index = 1: epochs
     
     %%%% varying multipath %%%%
     if Index < 15
-        mltpth_delays=chan4.delays;
-        mltpth_attenuation=chan4.attenuation;
+        mltpth_delays=chan4_1.delays;
+        mltpth_attenuation=chan4_1.attenuation;
     elseif dynamic_multipath
         if Index<40
-            LOS_delay=0.1;
+            chan4_1.delays=[0.4];
+            chan4_1.attenuation=[3];
+            mltpth_delays=chan4_1.delays;
+            mltpth_attenuation=chan4_1.attenuation;
+            %LOS_delay=0.1;
             %mltpth_delays=chan4.delays;
             %mltpth_attenuation=chan4.attenuation;
         elseif Index<50
@@ -208,7 +212,7 @@ for Index = 1: epochs
         y_unfiltered = corr_out';
         weights=C_sv(:,:,svindex);
 
-        if enable_LMS || enable_NLMS
+        if enable_LMS | enable_NLMS
             %%%%%%%%% LOS SIGNAL ESTIMATION %%%%%%%%%
             for subindex = 1 : total_corr
                 for subindex1 = 1 : total_corr 
@@ -262,33 +266,48 @@ for Index = 1: epochs
                 % Importance Sampling
                 % Generate path delays according to the Importance Density Function
                 if Index>1
-                    %particle(idx,1) = particle_pred(idx,1) + randn(1,1)*sqrt(C_s(Index-1, 1));
-                    pd = makedist('Normal','mu',particle_pred(idx,1),'sigma',sqrt(C_s(Index-1, 1)));
-                    t = truncate(pd,-0.5,0.5);
-                    particle(idx,1) = random(t,1,1);
+                    particle(idx,1) = particle_pred(idx,1) + randn(1,1)*sqrt(C_s(Index-1, 1));
                     for subindex=1:M_pf-1
+                        if 
                         pd = makedist('Normal','mu',particle_pred(idx,2*subindex+1),'sigma',sqrt(C_s(Index-1,subindex+1)));
                         t = truncate(pd,particle(idx,1),particle(idx,1)+1);%random(t,1,1)
-                        particle(idx,2*subindex+1) = random(t,1,1);
                         %particle(idx,2*subindex+1) = particle(idx,1) + abs((particle(idx,2*subindex+1)-particle(idx,1)) + random(t,1,1));%randn(1,1)*sqrt(C_s(Index-1,subindex+1)));
+                        particle(idx,2*subindex+1) = random(t,1,1);
+                        %particle(idx,2*subindex+1) = sqrt(C_s(Index-1,subindex+1))*randn(1,1)+particle_pred(idx,2*subindex+1);
+                        %particle(idx,2*subindex+1) = C_s(Index-1,subindex+1)*randn(1,1)+particle_pred(idx,2*subindex+1);
                     end
                 end
 
                 % Estimate amplitudes according to path delays
+                %R_pf = zeros(numSample, 1);
+                %time_stampsPF = (Spacing(P) + particle(idx,1)) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + particle(idx,1));
+                %R_pf(:, 1) = Code(ceil(time_stampsPF) + 4);
+                %particle(idx,2) = pinv(R_pf'*R_pf)*R_pf'*INCode';
+                %for subindex=1:M_pf-1
+                %    time_stampsPF = (Spacing(P) + particle(idx,2*subindex+1)) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + particle(idx,2*subindex+1));
+                %    R_pf(:, 1) = Code(ceil(time_stampsPF) + 4);
+                %    particle(idx,2*subindex+2) = pinv(R_pf'*R_pf)*R_pf'*INCode';
+                %end
                 LS_H = LS_S*corr_out;
                 for subindex=0:M_pf-1
                     particle(idx,2*subindex+2)=interp1(Spacing,LS_H,particle(idx,2*subindex+1));
+                    %if((particle(idx,2*subindex+1)>(particle(idx,1)+1)) || (particle(idx,2*subindex+1)<(particle(idx,1)) || isnan(particle(idx,2*subindex+2))))
                     if(isnan(particle(idx,2*subindex+2)))
                         particle(idx,2*subindex+2)=0;
                     end
                 end
                 
+
+
+                
                 % Weight update
                 % transform the particle into the measurements domain - correlation output
                 INCodePF=0;
                 for subindex=0:M_pf-1
-                    CodePF = Spacing(P) + particle(idx,2*subindex+1) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + particle(idx,2*subindex+1));
-                    INCodePF = INCodePF + Code(ceil(CodePF) + 4).*particle(idx,2*subindex+2);
+                    if particle(idx,2*subindex+2) ~= 0
+                        CodePF = Spacing(P) + particle(idx,2*subindex+1) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + particle(idx,2*subindex+1));
+                        INCodePF = INCodePF + Code(ceil(CodePF) + 4).*particle(idx,2*subindex+2);
+                    end
                 end
 
                 for subindex = 1: total_corr
@@ -391,7 +410,7 @@ for Index = 1: epochs
         if enable_PF
             DLLdiscri(1,Index) = -x_est_bpf(Index,1);
             code_output= (0.3749245/0.007030542258775)*2.5*DLLdiscri(1,Index);
-            %code_output= 0;
+            code_output= 0;
         end
     else
         DLL_E           = sqrt(corr_out(E)^2);
@@ -429,7 +448,7 @@ for Index = 1: epochs
             subplot(221);
             xlabel('Delay in chips')
             ylabel('Amplitude')
-            title('Channel Impulse Response (CIR)')
+            title(['Channel Impulse Response (CIR)'])
             ylim([-0.1 1.2])
             xlim([-0.1 1])
             drawnow
@@ -459,7 +478,7 @@ for Index = 1: epochs
             subplot(221)
             hold on
             cla
-            title('Channel Impulse Response (CIR)');
+            title(['Channel Impulse Response (CIR)']);
             stem(LOS_delay,1,'b');
             stem(mltpth_delays+LOS_delay,1./mltpth_attenuation,'r');
             hold on

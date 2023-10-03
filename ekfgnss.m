@@ -13,7 +13,7 @@ code_outputLast = 0;
 DLLdiscriLast = 0;
 cross_corr = 0;
 
-Spacing = (-1:0.05:1);
+Spacing = (-1:0.1:1);
 total_corr = size(Spacing,2);
 corr_per_chip = floor(total_corr/2);
 time_stamps = zeros(corr_per_chip*2+1,numSample);
@@ -123,14 +123,14 @@ for Index = 1: epochs
         mltpth_delays=chan4.delays;
         mltpth_attenuation=chan4.attenuation;
     elseif dynamic_multipath
-        if Index<100
+        if Index<60
             %LOS_delay=0.1;
             mltpth_delays=chan3.delays;
             mltpth_attenuation=chan3.attenuation;
-        elseif Index<150
+        elseif Index<80
             mltpth_delays=chan2.delays;
             mltpth_attenuation=chan2.attenuation;
-        elseif Index<250
+        elseif Index<100
             mltpth_delays=chan1.delays;
             mltpth_attenuation=chan1.attenuation;
         end
