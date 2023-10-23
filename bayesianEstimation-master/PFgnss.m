@@ -115,7 +115,7 @@ B=eye(L_ekf+2)*0.0001; % process noise covariance
 B(1,1)=0.1;
 drv_fi_ss=zeros(P_ekf,L_ekf+1);
 %% PF %%
-n_part = 250;%Number of particles
+n_part = 150;%Number of particles
 n_iter = 10;
 Rww_fil = 0 ; %Process noise
 Rvv_fil = 2500*((total_corr-1)/20)*(n_part/250); %Measurement noise (21 corr - 2500, 41 corr - 5000, ...)
@@ -391,7 +391,7 @@ for Index = 1: epochs
         if enable_PF
             DLLdiscri(1,Index) = -x_est_bpf(Index,1);
             code_output= (0.3749245/0.007030542258775)*2.5*DLLdiscri(1,Index);
-            %code_output= 0;
+            code_output= 0;
         end
     else
         DLL_E           = sqrt(corr_out(E)^2);

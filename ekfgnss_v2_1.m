@@ -68,7 +68,7 @@ T_c=0.001/codelength; % chip duration
 L_h=corr_per_chip; % correlators per chip
 L_c=L_h;
 N_corr=total_corr;
-N_meas=N_corr+1; % number of measurement variables
+N_meas=N_corr; % number of measurement variables
 N_tap=N_corr; % total correlators
 N_st=N_corr+1; % total states
 delta_t=1/L_h; % correlator spacing
@@ -106,7 +106,8 @@ S_k=zeros(N_meas,N_meas); % residual covariance matrix
 E_k=zeros(N_meas,1); % residual between measurement and predicted measurements
 IDENT=eye(N_st); % identity matrix
 tau_k=0; % LOS delay estimate
-
+B=eye(N_st)*0.0001; % process noise covariance matrix
+B(1,1)=0.000001;
 
 
 LOS_delay=0;
@@ -124,18 +125,18 @@ for Index = 1: epochs
         mltpth_delays=chan4.delays;
         mltpth_attenuation=chan4.attenuation;
     elseif dynamic_multipath
-        if Index<60
-            %LOS_delay=0.2;
-            mltpth_delays=chan3.delays;
-            mltpth_attenuation=chan3.attenuation;
+        if Index<600
+            LOS_delay=-0.1;
+            %mltpth_delays=chan3.delays;
+            %mltpth_attenuation=chan3.attenuation;
         elseif Index<80
-            %LOS_delay=0;
-            mltpth_delays=chan2.delays;
-            mltpth_attenuation=chan2.attenuation;
+            LOS_delay=0;
+            %mltpth_delays=chan2.delays;
+            %mltpth_attenuation=chan2.attenuation;
         elseif Index<100
-            %LOS_delay=-0.2;
-            mltpth_delays=chan1.delays;
-            mltpth_attenuation=chan1.attenuation;
+            LOS_delay=-0.2;
+            %mltpth_delays=chan1.delays;
+            %mltpth_attenuation=chan1.attenuation;
         end
     end
     
@@ -204,75 +205,38 @@ for Index = 1: epochs
                     end
                 end
 
-
-                Q(1,1)=(cov_Q_t^2)*(T_int^4)/4; % equation 20
-                Q(2:end,2:end)=(cov_Q_h^2).*Q(2:end,2:end);
-                idx_aux=1;
-                for idx=(-L_c*delta_t):(L_c*delta_t)
-                    % f_Tukey window (equation 26)
-                    if(abs(idx)<((1-alpha)*W))
-                        w(idx_aux,1)=1;
-                    elseif ((abs(idx)>=((1-alpha)*W)) && (abs(idx)<=W))
-                        w(idx_aux,1)=0.5+0.5*cos((pi/alpha)*((abs(idx)/W)+alpha-1));
-                    else
-                        w(idx_aux,1)=0;
-                    end
-                    w(idx_aux,1)=w(idx_aux,1)^(-1); % equation 25
-                    idx_aux=idx_aux+1;
-                end
-                R_wn_tilde_c=w*w'.*phi_ss; % equation 24
-                R_wn_c=R_wn_tilde_c./2; % equation 28
-                R(1:N_meas-1,1:N_meas-1)=R_wn_c; % equation 27
-                R(N_meas,N_meas)=constr_dev^2;
-
                 X_k(1,1)=0; % initial delay 0
                 X_k(1+L_h+1,1)=1; % initial multipath free scenario
+                init_X_k=X_k;
                 
                 P_k(1,1)=state_cov_t^2;
                 P_k(2:end,2:end)=P_k(2:end,2:end).*state_cov_h; % equation 32
                 
 
-                J_k(1:end-1,2:end)=phi_ss; % appendix A2
+                J_k(1:end,2:end)=phi_ss; % appendix A2
             end
 
 
             %%%%%% PREDICTION %%%%%%
             X_k = A*X_k; % equation 29
-            P_k = A*P_k*A' + Q; % equation 30
+            P_k = A*P_k*A' + B; % equation 30
 
 
             %%%%%% UPDATE %%%%%%
             % measurements
-            z_constr=(1/(2*L_h-1))*(abs(X_k(1+L_h+1,1))^(-2));
-            z_constr_aux=0; 
-            for idx=1:N_tap
-                if(idx~=(L_h+1))
-                    z_constr_aux=z_constr_aux+abs(X_k(idx+1,1))^2;
-                end
-            end
-            z_constr=z_constr*z_constr_aux;
-
-            Z_k(1:end-1,1) = corr_out'; % actual correlation output
-            Z_k_predict(1:end-1,1) = phi_ss*X_k(2:end,1); % predicted correlation output 
-            Z_k(N_meas,1) = 0; % constraining measurement
-            Z_k_predict(N_meas,1) = z_constr; % predicted constraining measurement
+            Z_k(1:end,1) = corr_out'; % actual correlation output
+            Z_k_predict(1:end,1) = phi_ss*X_k(2:end,1); % predicted correlation output
             E_k = Z_k - Z_k_predict;
 
             % jacobian 
-            J_k(1:end-1,1)=d_phi_ss*X_k(2:end,1); % appendix A1       
-            J_k(N_meas,1+L_h+1)=-(2/(2*L_h-1))*(X_k(1+L_h+1,1)/(abs(X_k(1+L_h+1,1))^4))*z_constr_aux; % equation A3-a
-            for idx=1:N_tap
-                if(idx~=(L_h+1))
-                    J_k(N_meas,1+idx)=(2/(2*L_h-1))*(X_k(1+idx,1)/(abs(X_k(1+L_h+1,1))^2)); % equation A3-b
-                end
-            end
-            J_k(N_meas,1)=0;
+            J_k(1:end,1)=d_phi_ss*X_k(2:end,1); % appendix A1    
             %J_k(N_meas,:)=zeros(1,N_st);
 
             % kalman equations
-            S_k = J_k*P_k*J_k' + R; % equation 34-b
+            S_k = J_k*P_k*J_k' + phi_ss; % equation 34-b
             K_k = P_k*J_k'*pinv(S_k); % equation 33-b
             X_k = X_k+K_k*E_k; % equation 33-a
+            %X_k(2:end,1)=init_X_k(2:end,1);
             P_k = (IDENT-K_k*J_k)*P_k; % equation 34-a
 
             t_los = X_k(1,1);
@@ -286,8 +250,8 @@ for Index = 1: epochs
         else
             DLLdiscri(1,Index) = Spacing(P) - Spacing(t_los);
         end
-        code_output = DLLdiscri(1,Index)*1000;%chips to hz
-        code_output = 0; %uncomment to disable DLL corrections
+        code_output = (DLLdiscri(1,Index)/(0.001/1023));%chips to hz
+        %code_output = 0; %uncomment to disable DLL corrections
     else % this is the traditional DLL loop filter and nco
         DLL_E = sqrt(corr_out(E)^2);
         DLL_L = sqrt(corr_out(L)^2);

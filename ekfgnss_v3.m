@@ -1,6 +1,18 @@
 clear all;
 close all;
 clc;
+load('L1_CA_20MHz.mat', 'signal', 'signal_deriv');
+N_corr = 41; % number of correlators
+signals = zeros(length(signal), N_corr);
+signals_deriv = zeros(length(signal), N_corr);
+shiftidx= zeros(N_corr,1);
+for iCorr = 1:N_corr
+    signals(:, iCorr) = circshift(signal, iCorr - ceil(N_corr/2));
+    signals_deriv(:, iCorr) = circshift(signal_deriv, iCorr - ceil(N_corr/2));
+    shiftidx(iCorr,1)=(iCorr-ceil(N_corr/2));
+end
+
+
 % Define the parameters for the simulation
 c = 299792458; % m/s
 fs = 20000000; % Sample rate (Hz)
@@ -13,7 +25,9 @@ code_outputLast = 0;
 DLLdiscriLast = 0;
 cross_corr = 0;
 
-Spacing = (-1:0.1:1); % change here the number of correlators (0.1=21correlators, 0.05=41correlators ...)
+%Spacing = (-1:0.1:1); % change here the number of correlators (0.1=21correlators, 0.05=41correlators ...)
+Spacing = (codeFreqBasis/fs).*shiftidx';
+delayRes = (codeFreqBasis/fs);
 total_corr = size(Spacing,2);
 corr_per_chip = floor(total_corr/2);
 time_stamps = zeros(corr_per_chip*2+1,numSample);
@@ -32,7 +46,7 @@ chan1.attenuation=[2 2.5 3 2 1.5 1.6 1.7 4 3];
 chan2.delays=[0.1 0.25 0.35 0.45 0.55];
 chan2.attenuation=[1.8 2.2 3 3.5 4];
 % Channel 3
-chan3.delays=[0.1 0.2 0.3];
+chan3.delays=[delayRes 2*delayRes 3*delayRes];
 chan3.attenuation=[2 4 8];
 % Channel 4
 chan4.delays=[];
@@ -58,7 +72,6 @@ end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% VARIABLES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% COMMON %%
-LS_G = zeros(total_corr, total_corr);
 a_los = 0;
 t_los = 0;
 %% EKF %%
@@ -71,7 +84,7 @@ N_corr=total_corr;
 N_meas=N_corr+1; % number of measurement variables
 N_tap=N_corr; % total correlators
 N_st=N_corr+1; % total states
-delta_t=1/L_h; % correlator spacing
+delta_t=delayRes; % correlator spacing
 T_h=delta_t;
 W_CIR=L_h*T_h; % CIR ring
 W_bank=W_CIR;
@@ -106,6 +119,9 @@ S_k=zeros(N_meas,N_meas); % residual covariance matrix
 E_k=zeros(N_meas,1); % residual between measurement and predicted measurements
 IDENT=eye(N_st); % identity matrix
 tau_k=0; % LOS delay estimate
+%% Determine autocorrelation functions
+phi_ss = signals' * signals;
+d_phi_ss = signals' * signals_deriv;
 
 
 
@@ -142,7 +158,7 @@ for Index = 1: epochs
     %%%% varying LOS %%%%
     if dynamic_LOS
         if Index<200
-            LOS_delay=LOS_delay+0.001; % simulate negative doppler
+            LOS_delay=LOS_delay+delayRes; % simulate negative doppler
         else
             LOS_delay=LOS_delay-0.000;
         end
@@ -151,40 +167,29 @@ for Index = 1: epochs
 
     %numSample = round((codelength-remChip)/(codeFreq/fs)); 
     
-    LOS_Code = Spacing(P)+LOS_delay : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P)+LOS_delay);
-    INCode   = Code(ceil(LOS_Code) + 2);
+    INCode   = circshift(signal, LOS_delay/delayRes);
 
     %interference injection
     for subindex = 1: size(mltpth_delays, 2)
-        multipath = Spacing(P) + mltpth_delays(subindex) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(P) + mltpth_delays(subindex));
-        INCode = INCode + Code(ceil(multipath) + 2)./mltpth_attenuation(subindex);
+        INCode = INCode + circshift(signal, mltpth_delays(subindex)/delayRes)./mltpth_attenuation(subindex);
     end
 
     %correlator engine
     for subindex = 1: total_corr
-        time_stamps(subindex,:) = (Spacing(subindex) + remChip) : codeFreq/fs : ((numSample -1) * (codeFreq/fs) + Spacing(subindex) + remChip);
-        code_replicas(subindex,:) = Code(ceil(time_stamps(subindex,:)) + 2);
-        corr_out(subindex) = sum(code_replicas(subindex,:)     .*INCode);
+        code_replicas(subindex,:) = circshift(signal, ceil((Spacing(subindex) + remChip)/delayRes));
+        corr_out(subindex) = sum(code_replicas(subindex,:)     .*INCode');
+        
     end
 
-    remChip   = (time_stamps(P,numSample) + codeFreq/fs) - codeFreqBasis*0.001;
+    remChip   = (((numSample -1) * (codeFreq/fs) + Spacing(P) + remChip) + codeFreq/fs) - codeFreqBasis*0.001;
 
 
 
     if new_tracking
-        if (Index == 1) % compute correlation matrix
-            for subindex = 1 : total_corr
-                for subindex1 = 1 : total_corr 
-                    LS_G(subindex1,subindex) = sum(code_replicas(subindex,:).*code_replicas(subindex1,:));
-                end
-            end
-        end 
-
-        %%%%%%%%% ADAPTIVE CHANNEL COMPENSATION %%%%%%%%%
         % LS
         if enable_LS
             if (Index==1)
-                LS_S=pinv(LS_G'*LS_G)*LS_G';
+                LS_S=pinv(phi_ss'*phi_ss)*phi_ss';
             end
             LS_H = LS_S*corr_out;
             [a_los, t_los] = max(LS_H);
@@ -193,18 +198,6 @@ for Index = 1: epochs
         elseif enable_EKF 
             %%%%%% INITIALIZATION %%%%%%
             if (Index == 1)
-                phi_ss = code_replicas*code_replicas';
-
-                for idx = 1 : N_corr
-                    for idx1 = 1 : N_corr
-                        extended_code_replica=[code_replicas(idx,end) code_replicas(idx,:) code_replicas(idx,1)];
-                        d_s1=(extended_code_replica(3:1:end)-extended_code_replica(1:1:end-2))/(2*(1/fs));
-                        s2=code_replicas(idx1,:);
-                        d_phi_ss(idx,idx1) = sum(d_s1 .* s2);
-                    end
-                end
-
-
                 Q(1,1)=(cov_Q_t^2)*(T_int^4)/4; % equation 20
                 Q(2:end,2:end)=(cov_Q_h^2).*Q(2:end,2:end);
                 idx_aux=1;
@@ -267,7 +260,7 @@ for Index = 1: epochs
                 end
             end
             J_k(N_meas,1)=0;
-            %J_k(N_meas,:)=zeros(1,N_st);
+            J_k(N_meas,:)=zeros(1,N_st);
 
             % kalman equations
             S_k = J_k*P_k*J_k' + R; % equation 34-b
@@ -298,8 +291,6 @@ for Index = 1: epochs
     end
 
     codeFreq = codeFreqBasis - code_output;
-
-
     PR_error(Index,1)=(time_stamps(P)-LOS_delay)*(0.001/1023)*c;%compute pseudorange error - 1 PRN period is 1ms (1023 chips)
 
     % PLOTS
