@@ -38,8 +38,8 @@ chan3.attenuation=[2 4 8];
 % Channel 4
 chan4.delays=[];
 chan4.attenuation=[];
-chan4_1.delays=[0.2];
-chan4_1.attenuation=[2];
+chan4_1.delays=[0.2 0.3];
+chan4_1.attenuation=[2 2.5];
 
 
 epochs = 5000; %signal tracking epochs
@@ -115,11 +115,11 @@ B=eye(L_ekf+2)*0.0001; % process noise covariance
 B(1,1)=0.1;
 drv_fi_ss=zeros(P_ekf,L_ekf+1);
 %% PF %%
-n_part = 150;%Number of particles
+n_part = 400;%Number of particles
 n_iter = 10;
 Rww_fil = 0 ; %Process noise
 Rvv_fil = 2500*((total_corr-1)/20)*(n_part/250); %Measurement noise (21 corr - 2500, 41 corr - 5000, ...)
-M_pf = 1; % number of paths
+M_pf = 3; % number of paths
 x_est_bpf = zeros(epochs,2*M_pf);
 C_s = zeros(epochs,M_pf);
 corr_outPF = zeros(1,total_corr)';
@@ -139,10 +139,10 @@ for Index = 1: epochs
         mltpth_delays=chan4.delays;
         mltpth_attenuation=chan4.attenuation;
     elseif dynamic_multipath
-        if Index<40
-            LOS_delay=0.1;
-            %mltpth_delays=chan4.delays;
-            %mltpth_attenuation=chan4.attenuation;
+        if Index<400
+            %LOS_delay=0.1;
+            mltpth_delays=chan4_1.delays;
+            mltpth_attenuation=chan4_1.attenuation;
         elseif Index<50
             LOS_delay=0.2;
             %mltpth_delays=chan4.delays;
@@ -311,7 +311,7 @@ for Index = 1: epochs
             % Update the covariance of the state error estimation
             for idx=1:n_part
                 for subindex=0:M_pf-1
-                    C_s(Index,subindex+1) = C_s(Index,subindex+1) + weight(idx)*((particle(idx,subindex*2+1:subindex*2+2)-x_est_bpf(Index,subindex*2+1:subindex*2+2))*(particle(idx,subindex*2+1:subindex*2+2)-x_est_bpf(Index,subindex*2+1:subindex*2+2))');
+                    C_s(Index,subindex+1) = C_s(Index,subindex+1) + weight(idx)*(   (particle(idx,subindex*2+1:subindex*2+2)-x_est_bpf(Index,subindex*2+1:subindex*2+2))*(particle(idx,subindex*2+1:subindex*2+2)-x_est_bpf(Index,subindex*2+1:subindex*2+2))');
                 end
             end
             
@@ -391,7 +391,7 @@ for Index = 1: epochs
         if enable_PF
             DLLdiscri(1,Index) = -x_est_bpf(Index,1);
             code_output= (0.3749245/0.007030542258775)*2.5*DLLdiscri(1,Index);
-            code_output= 0;
+            %code_output= 0;
         end
     else
         DLL_E           = sqrt(corr_out(E)^2);

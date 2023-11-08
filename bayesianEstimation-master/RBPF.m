@@ -1,6 +1,7 @@
 clear all;
 close all;
 clc;
+SimpleKalman(GetVolt());
 % Define the parameters for the simulation
 c = 299792458; % m/s
 fs = 26000000; % Sample rate (Hz)
@@ -531,39 +532,96 @@ function volt = SimpleKalman(z)
     persistent A H Q R 
     persistent x P
     persistent firstRun
+        response = figure(1);
+        subplot(222);
+        p0=plot((1), (1),'-','Color',"#77AC30");
+        title('estimate x')
+        hold on;
+        % plot initial position of central correlators and filter peak
+        
+        % plot initial desired response
 
+        % plot multipath information
+        drawnow
+        subplot(221);
+        p1=plot((1), (1),'-','Color',"#77AC30");
+        title('error cov P')
+        drawnow
+
+        subplot(223);
+        p2=plot((1), (1),'-','Color',"#77AC30");
+        title('measurement')
+        subplot(224);
+        p3=plot((1), (1),'-','Color',"#77AC30");
+        title('gain')
 
     if isempty(firstRun)
+
+
         A = 1;
         H = 1;
         
-        Q = 0;
+        Q = 1;
         R = 4;
 
-        x = 14;
-        P =  6;
+        x=zeros(6001,1);
+        P=zeros(6001,1);
+        z=zeros(6001,1);
+        k=zeros(6001,1);
+        x(1,1) = 14;
+        P(1,1) =  6;
         
         firstRun = 1;  
     end
 
-        
-    xp = A*x;
-    Pp = A*P*A' + Q;
+    for i=1:6000  
+        if i>=250
+            z(i,1) = 14.4 + 10 +  40*randn(1,1);
+            R=40;
+        else
+            z(i,1) = 14.4 + 4*randn(1,1);
+        end
+        xp = A*x(i,1);
+        Pp = A*P(i,1)*A' + Q;
 
-    K = Pp*H'*inv(H*Pp*H' + R);
+        K(i,1) = Pp*H'*inv(H*Pp*H' + R);
 
-    x = xp + K*(z - H*xp);
-    P = Pp - K*H*Pp;
+        x(i+1,1) = xp + K(i,1)*(z(i,1) - H*xp);
+        P(i+1,1) = Pp - K(i,1)*H*Pp;
 
 
-    volt = x;
+        volt = x;
+
+
+                    %%%% REFRESH PLOTS %%%%
+                    set(p0,'XData',(1:1:i),'YData',x(1:i,1));
+                    drawnow
+                    set(p1,'XData',(1:1:i),'YData',P(1:i,1));
+                    drawnow
+                    set(p2,'XData',(1:1:i),'YData',z(1:i,1));
+                    drawnow
+                    set(p3,'XData',(1:1:i),'YData',K(1:i,1));
+                    drawnow
+                    %pause(0.001);
+
+    end
 end
 
 function z = GetVolt()
-    %
-    %
+    persistent count
+    persistent firstRun1
+    if isempty(firstRun1)
+        
+        count = 0;
+        firstRun1=1;
+    end
+    count = count+1;
     w = 0 + 4*randn(1,1);
-    z = 14.4 + w;
+    if count>=50
+        z = 14.4 + 50 + w;
+    else
+        z = 14.4 + w;
+    end
 end
 %{
 
