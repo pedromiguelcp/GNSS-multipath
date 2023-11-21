@@ -177,7 +177,7 @@ function [TckResultCT_pos, navSolutionsCT] = trackingCT_POS_updated(file,signal,
     %%%%% SELECT THE ALGORITHM %%%%%
     enable_LS = 0;
     enable_LMS = 0;
-    enable_NLMS = 1;
+    enable_NLMS = 0;
     enable_LMS_MO1 = 0;
     enable_LMS_MO2 = 0;
     enable_APA = 0;

@@ -3,7 +3,7 @@ close all;
 clc;
 % Define the parameters for the simulation
 c = 299792458; % m/s
-fs = 26000000; % Sample rate (Hz)
+fs = 20000000; % Sample rate (Hz)
 codeFreqBasis = 1.023e6; % C/A code rate (chips/s)
 codeFreq = codeFreqBasis;
 codelength = 1023;
@@ -13,7 +13,7 @@ code_outputLast = 0;
 DLLdiscriLast = 0;
 cross_corr = 0;
 
-Spacing = (-1:0.1:1);
+Spacing = (-1:0.05:1);
 total_corr = size(Spacing,2);
 corr_per_chip = floor(total_corr/2);
 time_stamps = zeros(corr_per_chip*2+1,numSample);
@@ -29,8 +29,9 @@ VL = corr_per_chip+3;
 chan1.delays=[0.1 0.25 0.35 0.45 0.55 0.65 0.75 0.85 0.9];
 chan1.attenuation=[2 2.5 3 2 1.5 1.6 1.7 4 3];
 %Channel 2
-chan2.delays=[0.1 0.25 0.35 0.45 0.55];
-chan2.attenuation=[1.8 2.2 3 3.5 4];
+delayRes=0.05;
+chan2.delays=[0 2*delayRes 3*delayRes 5*delayRes 6*delayRes];
+chan2.attenuation=[1 3 4 4.5 5.5];
 % Channel 3
 chan3.delays=[0.1 0.25 0.35];
 chan3.attenuation=[2 4 8];
@@ -53,7 +54,7 @@ svindex=1;
 %%%%% SELECT THE ALGORITHM %%%%%
 enable_LS = 0;
 enable_LMS = 0;
-enable_NLMS = 1;
+enable_NLMS = 0;
 enable_RLS = 0;
 enable_LMS_MO1 = 0; % unfinished
 enable_APA = 0; % unfinished
@@ -113,20 +114,20 @@ P_rls=eye(total_corr)/delta;
 
 PR_error = zeros(epochs,1);
 LOS_delay=0;
-dynamic_LOS=0; % time-varying LOS
-dynamic_multipath=1; % time-varying multipath
+dynamic_LOS=1; % time-varying LOS
+dynamic_multipath=0; % time-varying multipath
 
 
 for Index = 1: epochs
     
     %%%% varying multipath %%%%
-    if Index < 30
+    if Index < 31
         mltpth_delays=chan4.delays;
         mltpth_attenuation=chan4.attenuation;
     elseif dynamic_multipath
-        if Index<100
-            mltpth_delays=chan3.delays;
-            mltpth_attenuation=chan3.attenuation;
+        if Index<1000
+            mltpth_delays=chan2.delays;
+            mltpth_attenuation=chan2.attenuation;
         elseif Index<150
             mltpth_delays=chan2.delays;
             mltpth_attenuation=chan2.attenuation;
@@ -147,10 +148,8 @@ for Index = 1: epochs
     
     %%%% varying LOS %%%%
     if dynamic_LOS
-        if Index<200
-            LOS_delay=LOS_delay+0.001; % simulate positive doppler
-        else
-            LOS_delay=LOS_delay-0.001; % simulate negative doppler
+        if Index>100
+            LOS_delay=LOS_delay+0.05/10; % simulate positive doppler
         end
     end
     mltpth_delays=mltpth_delays+LOS_delay; % multipaths are relative to the LOS
@@ -282,7 +281,7 @@ for Index = 1: epochs
         code_outputLast = code_output;
     end
 
-    codeFreq = codeFreqBasis - code_output;
+    codeFreq = codeFreqBasis - 0;
     PR_error(Index,1)=(time_stamps(P)-LOS_delay)*(0.001/1023)*c;%compute pseudorange error - 1 PRN period is 1ms (1023 chips)
 
     % PLOTS

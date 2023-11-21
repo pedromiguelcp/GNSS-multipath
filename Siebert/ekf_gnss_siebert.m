@@ -92,12 +92,11 @@ z_constr=0; % constraining measurement
 phi_ss = zeros(N_corr, N_corr); % correlation matrix
 d_phi_ss = zeros(N_corr, N_corr); % derivative of correlation matrix
 IDENT=eye(N_st); % identity matrix
-t_los = 0; % LOS delay estimate
 
 %%%%%%%%%%%%%% SIMULATION CONFIG %%%%%%%%%%%%%%
 LOS_delay=0;
-dynamic_LOS=0; % time-varying LOS
-dynamic_multipath=1; % time-varying multipath
+dynamic_LOS=1; % time-varying LOS
+dynamic_multipath=0; % time-varying multipath
 en_plots=1; % enable plots
 % initial multipath free channel
 path_delays=chan4.delays;
@@ -123,8 +122,11 @@ for Index = 1: epochs
     
     %%%% varying LOS %%%%
     if dynamic_LOS
-        if Index>50 && Index<300
+        if Index>50 && Index<=250
             LOS_delay=LOS_delay+delayRes/4;
+            path_delays=chan4.delays+LOS_delay; % all signal paths shifted
+        elseif Index>250 && Index<350
+            LOS_delay=LOS_delay+delayRes/6;
             path_delays=chan4.delays+LOS_delay; % all signal paths shifted
         end
     end
@@ -175,6 +177,10 @@ for Index = 1: epochs
 
     %%%%%% UPDATE %%%%%%
     % measurements
+    % the constraining measurement indicates the energy ratio between the central tap and the others
+    % as the goal is no maximize the central tap (alignment with LOS) an error is produced (0-z_constr)
+    % which forces the EKF to align the estimated CIR with the true CIR
+    % without the constraining measurement the EKF LOS delay estimate could stop in a local minimum instead of global
     z_constr=(1/(2*L_h-1))*(abs(X_k(1+L_h+1,1))^(-2));
     z_constr_aux=0; 
     for idx=1:N_tap
@@ -183,6 +189,7 @@ for Index = 1: epochs
         end
     end
     z_constr=z_constr*z_constr_aux;
+    constrainingMeasurement(Index,1)=z_constr;
 
     Z_k(1:end-1,1) = corr_out'; % actual correlation output
     Z_k_predict(1:end-1,1) = phi_ss*X_k(2:end,1); % predicted correlation output 
@@ -192,7 +199,8 @@ for Index = 1: epochs
 
     % jacobian 
     J_k(1:end-1,1)=d_phi_ss*X_k(2:end,1);    
-    J_k(N_meas,1+L_h+1)=-(2/(2*L_h-1))*(X_k(1+L_h+1,1)/(abs(X_k(1+L_h+1,1))^4))*z_constr_aux;
+    %J_k(N_meas,1+L_h+1)=-(2/(2*L_h-1))*(X_k(1+L_h+1,1)/(abs(X_k(1+L_h+1,1))^4))*z_constr_aux;
+    J_k(N_meas,1+L_h+1)=-(2/(2*L_h-1))*(X_k(1+L_h+1,1))*z_constr_aux;
     for idx=1:N_tap
         if(idx~=(L_h+1))
             J_k(N_meas,1+idx)=(2/(2*L_h-1))*(X_k(1+idx,1)/(abs(X_k(1+L_h+1,1))^2));
@@ -207,14 +215,13 @@ for Index = 1: epochs
     X_k = X_k+K_k*E_k;
     P_k = (IDENT-K_k*J_k)*P_k;
 
-    t_los = X_k(1,1); % feedback for local replicas
-    %t_los = 0; % open loop
-
-
+    
+    
     % PLOTS
-    DLLdiscri(1,Index)=X_k(1,1);
-    %PR_error(Index,1)=(ceil(t_los/delayRes)-LOS_delay)*(0.001/1023)*c;%compute pseudorange error - 1 PRN period is 1ms (1023 chips)
-    PR_error(Index,1)=(LOS_delay*T_c+t_los)*c;
+    DLLdiscri(1,Index)=X_k(1,1);% feedback for local replicas
+    %DLLdiscri(1,Index) = 0; % open loop
+
+    PR_error(Index,1)=(LOS_delay*T_c+X_k(1,1))*c;
     if (en_plots)
         if(Index == 1) 
             % plot initial correlation output
@@ -225,7 +232,7 @@ for Index = 1: epochs
             xlim([-1.1 1.1])
             ylabel('Normalized Amplitude')
             xlabel('Delay [chips]')
-            title('ACF')
+            title('Auto-Correlation Function (ACF)')
             grid on;
             hold on;
             % plot initial position of central correlators and filter peak
@@ -235,6 +242,7 @@ for Index = 1: epochs
             p2=plot(Spacing,Z_k_predict(1:end-1,1)/numSample);
             p3=plot(Spacing,(Z_k_predict(1:end-1,1)-corr_out)/numSample);
     
+            constrainingMeasurement
             % plot multipath information
             drawnow
             subplot(221);
@@ -249,7 +257,12 @@ for Index = 1: epochs
             xlabel('Epochs (ms)')
             title('LOS delay state estimate')
             subplot(224);
-            pr=plot((1 : 1 : Index), PR_error((1 : 1 : Index),1),'-','Color',"#7E2F8E");
+            pr=plot((1 : 1 : Index), PR_error((1 : 1 : Index),1),'-','Color',"#7E2F8E",'DisplayName','EKF');
+            hold on;
+            legend;
+            %pr2=plot((1 : 1 : Index), DLL_PR_error((1 : 1 : Index),1),'-','Color',"#77AC30",'DisplayName','Narrow correlator');
+            constr=plot((1 : 1 : Index), constrainingMeasurement((1 : 1 : Index),1),'b','DisplayName','Constraining measurement');
+            drawnow
             ylabel('Meters')
             xlabel('Epochs (ms)')
             title('Pseudorange error')
@@ -263,6 +276,8 @@ for Index = 1: epochs
             set(discri,'XData',(1 : 1 : Index),'YData',DLLdiscri(1,(1 : 1 : Index)));
             drawnow
             set(pr,'XData',(1 : 1 : Index),'YData',PR_error((1 : 1 : Index),1));
+            %set(pr2,'XData',(1 : 1 : Index),'YData',DLL_PR_error((1 : 1 : Index),1));
+            set(constr,'XData',(1 : 1 : Index),'YData',constrainingMeasurement((1 : 1 : Index),1));
             drawnow
             figure(response);
             subplot(221)
